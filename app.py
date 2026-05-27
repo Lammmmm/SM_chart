@@ -108,129 +108,110 @@ with st.spinner("正在扫描链上战术数据..."):
 # 3. 动态堆叠子图渲染 (1对多联动)
 # ==========================================
 if not df.empty:
-    # 定义 4 行子图，仅在 Row 2 启用次坐标轴 (secondary_y=True)
+    if 'ls_ratio' in df.columns:
+        df['long_percent'] = (df["ls_ratio"] / (df["ls_ratio"] + 1)) * 100
+    else:
+        df['long_percent'] = 0
+
     fig = make_subplots(
-        rows=4, cols=1, 
-        shared_xaxes=True,           # 全局 X 轴完美联动
-        vertical_spacing=0.03,       # 紧凑排列
-        row_heights=[0.35, 0.25, 0.20, 0.20], # 高度动态分配
-        specs=[
-            [{"secondary_y": False}],
-            [{"secondary_y": True}],
-            [{"secondary_y": False}],
-            [{"secondary_y": False}]
-        ]
+        rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.03, 
+        row_heights=[0.4, 0.2, 0.2, 0.2], 
+        specs=[[{"secondary_y": False}], [{"secondary_y": True}], [{"secondary_y": False}], [{"secondary_y": False}]]
     )
     
     # ---------------- Row 1: 主图 (价格走势) ----------------
     fig.add_trace(
         go.Scatter(
             x=df["timestamp"], y=df["current_price"],
-            name="BTC 当前价格",
+            name="BTC 价格",
             mode='lines',
-            line=dict(color='#00E676', width=2.5) # 极客感亮绿
+            line=dict(color='#00E676', width=2.5),
+            hovertemplate="%{y:,.2f} USDT<extra></extra>"
         ),
         row=1, col=1
     )
     fig.update_yaxes(title_text="<b>BTC 价格 (USDT)</b>", row=1, col=1)
 
-    # ---------------- Row 2: T0 级散户背离监控 ----------------
-    # 目的：展示散户人数飙升，但主力总资金未跟上或撤退的诱多诱空陷阱
-    
-    # 主 Y 轴 (左)：散户人数柱子 (极高可见度配色)
+    # ---------------- Row 2: 多头人数与总资金 (T0 级散户背离监控) ----------------
     fig.add_trace(
-        go.Bar(
+        go.Scatter(
             x=df["timestamp"], y=df["long_traders"],
             name="多头人数",
-            marker_color="#A78BFA", # 亮紫色，与深色背景及蓝色折线形成强烈视觉对比
-            opacity=0.9
+            mode='lines',
+            line=dict(color="#A78BFA", width=1),
+            fill='tozeroy',
+            fillcolor='rgba(167, 139, 250, 0.85)',
+            hovertemplate="%{y:,.0f} 人<extra></extra>"
         ),
         row=2, col=1, secondary_y=False
     )
-    # 次 Y 轴 (右)：总资金折线 (亮色展示趋势)
     fig.add_trace(
         go.Scatter(
             x=df["timestamp"], y=df["long_pos_usdt"],
             name="多头总资金",
             mode='lines',
-            line=dict(color='#2962FF', width=3) # 加粗亮蓝
+            line=dict(color='#2962FF', width=3),
+            hovertemplate="%{y:,.0f} U<extra></extra>"
         ),
         row=2, col=1, secondary_y=True
     )
     fig.update_yaxes(title_text="多头人数", row=2, col=1, secondary_y=False, showgrid=False)
-    fig.update_yaxes(title_text="总资金 (USDT)", row=2, col=1, secondary_y=True, showgrid=True)
+    fig.update_yaxes(title_text="总资金", row=2, col=1, secondary_y=True, showgrid=True)
 
-    # ---------------- Row 3: 轧空绞肉机 ----------------
-    # 一眼展示市场大爆仓时的多空血腥程度
+    # ---------------- Row 3: 轧空绞肉机 (面积图) ----------------
     if 'long_unrealized_pnl' in df.columns and 'short_unrealized_pnl' in df.columns:
-        # 核心修复：Plotly 原生机制下纯柱状图无法全屏捕获悬停，在此植入一条隐形折线，用来完美吸附鼠标
         fig.add_trace(
             go.Scatter(
                 x=df["timestamp"], y=df["long_unrealized_pnl"],
-                mode='lines', line=dict(color='rgba(0,0,0,0)', width=0),
-                hoverinfo='skip', showlegend=False
-            ),
-            row=3, col=1
-        )
-        
-        fig.add_trace(
-            go.Bar(
-                x=df["timestamp"], y=df["long_unrealized_pnl"],
                 name="多头未实现盈亏",
-                marker_color="#00E676", # 绿色
-                opacity=0.85
+                mode='lines',
+                line=dict(color="#00E676", width=1),
+                fill='tozeroy',
+                fillcolor='rgba(0, 230, 118, 0.85)',
+                hovertemplate="%{y:,.0f} U<extra></extra>"
             ),
             row=3, col=1
         )
         fig.add_trace(
-            go.Bar(
+            go.Scatter(
                 x=df["timestamp"], y=df["short_unrealized_pnl"],
                 name="空头未实现盈亏",
-                marker_color="#FF1744", # 红色向深渊延伸
-                opacity=0.85
+                mode='lines',
+                line=dict(color="#FF1744", width=1),
+                fill='tozeroy',
+                fillcolor='rgba(255, 23, 68, 0.85)',
+                hovertemplate="%{y:,.0f} U<extra></extra>"
             ),
             row=3, col=1
         )
     fig.update_yaxes(title_text="未实现盈亏", row=3, col=1)
 
-    # ---------------- Row 4: 多头账户占比 (0-100%) ----------------
-    if 'ls_ratio' in df.columns:
-        # 将原始多空比 (比如 1.5) 转换为多头百分比 (比如 60%)
-        long_percent = (df["ls_ratio"] / (df["ls_ratio"] + 1)) * 100
-        
-        # 核心修复：同上，植入隐形折线完美吸附鼠标
-        fig.add_trace(
-            go.Scatter(
-                x=df["timestamp"], y=long_percent,
-                mode='lines', line=dict(color='rgba(0,0,0,0)', width=0),
-                hoverinfo='skip', showlegend=False
-            ),
-            row=4, col=1
-        )
-        
-        fig.add_trace(
-            go.Bar(
-                x=df["timestamp"], y=long_percent,
-                name="多头占比(%)",
-                marker_color="#F59E0B", # 橙色
-                opacity=0.9
-            ),
-            row=4, col=1
-        )
+    # ---------------- Row 4: 多头账户占比 (面积图) ----------------
+    fig.add_trace(
+        go.Scatter(
+            x=df["timestamp"], y=df["long_percent"],
+            name="多头占比",
+            mode='lines',
+            line=dict(color="#F59E0B", width=1),
+            fill='tozeroy',
+            fillcolor='rgba(245, 158, 11, 0.9)',
+            hovertemplate="%{y:.1f}%<extra></extra>"
+        ),
+        row=4, col=1
+    )
     fig.update_yaxes(title_text="多头占比(%)", range=[0, 100], row=4, col=1)
 
     # ==========================================
     # 全局交互与高级极客暗黑 UI
     # ==========================================
     fig.update_layout(
-        height=900,                  # 高度撑满视野
-        hovermode="x",               # 核心修复：改为 'x' 模式。悬停时，所有子图同一时间点的数据会同时弹出！
-        hoverdistance=-1,            # 强制捕获跨图层悬停
-        spikedistance=-1,            # 强制捕获跨图层准星
-        showlegend=False,            # 屏蔽图例，专注图形
-        barmode='relative',          # 确保正负向的 Bar 在 0 轴两侧正确渲染不遮挡
+        height=900,                  
+        hovermode="x unified",       
+        hoversubplots="axis",        # 解决跨子图联动与双 Y 轴冲突的唯一核心开关
+        showlegend=False,            
+        barmode='relative',          
         margin=dict(l=10, r=10, t=40, b=10),
-        paper_bgcolor="#0b0e11",     # 纯正暗黑风
+        paper_bgcolor="#0b0e11",     
         plot_bgcolor="#0b0e11",
         font=dict(color="#848e9c"),
         hoverlabel=dict(
@@ -240,30 +221,28 @@ if not df.empty:
         )
     )
 
-    # 统一化极度微弱的网格线与全局贯穿十字准星 (Spike Lines)
+    # 强制所有 X 轴贯穿垂直十字准星，关闭 Y 轴水平准星防止杂乱
     for row in range(1, 5):
         fig.update_xaxes(
             showgrid=True, gridcolor="rgba(255,255,255,0.05)", zeroline=False, 
-            showspikes=True, spikemode="across", spikecolor="#6B7280", spikethickness=1, spikedash="solid",
+            showspikes=True, spikemode="across", spikecolor="#999999", spikethickness=1, spikedash="solid",
+            rangeslider_visible=False,
             row=row, col=1
         )
-        # 为主坐标轴添加微弱网格，并开启 Y 轴水平十字准星，组合成完整的 TradingView 十字光标
         fig.update_yaxes(
             showgrid=True, gridcolor="rgba(255,255,255,0.05)", 
             zeroline=True, zerolinecolor="rgba(255,255,255,0.15)", 
-            showspikes=True, spikemode="across", spikecolor="#6B7280", spikethickness=1, spikedash="solid",
+            showspikes=False, 
             row=row, col=1, secondary_y=False
         )
 
-    # 强制关闭 RangeSlider (它会导致多子图 x unified 失效)，采用原生的鼠标框选缩放
+    # 针对 Row 4 的底层 X 轴，特殊格式化时间戳
     fig.update_xaxes(
-        rangeslider_visible=False,
         tickformat="%m月%d日 %H:%M",
         hoverformat="%Y年%m月%d日 %H:%M:%S",
         row=4, col=1
     )
 
-    # 渲染页面，自适应浏览器宽度
     st.plotly_chart(fig, use_container_width=True)
 
 else:
