@@ -3,5 +3,6 @@ __pycache__/
 .env
 .streamlit/
 dist/
+config.json
 build/
 .DS_Store

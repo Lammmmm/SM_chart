@@ -25,13 +25,14 @@ export interface SmartMoneyRecord {
  * @param symbol  币种标识 (如果数据库设计有区分的话，默认传入)
  * @param limit   一次性获取的数据条数
  */
-export async function fetchStats(symbol: string = 'BTCUSDT', limit: number = 500): Promise<SmartMoneyRecord[]> {
+export async function fetchStats(symbol: string = 'BTCUSDT'): Promise<SmartMoneyRecord[]> {
   try {
-    const result = await pb.collection('smart_money_stats').getList<SmartMoneyRecord>(1, limit, {
+    // 使用 getFullList 获取所有历史数据
+    const items = await pb.collection('smart_money_stats').getFullList<SmartMoneyRecord>({
       sort: 'timestamp', // 确保时间正序，以便 ECharts X轴从左到右渲染
-      // filter: `symbol = '${symbol}'` // 若表结构中有 symbol，可解除此行注释
+      filter: 'current_price > 0', // 数据库层面拦截过滤价格为 0 的异常脏数据
     });
-    return result.items;
+    return items;
   } catch (error) {
     console.error('获取 PocketBase 数据失败:', error);
     throw error;
