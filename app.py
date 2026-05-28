@@ -80,10 +80,7 @@ def fetch_and_process_data():
         if 'long_traders' in df.columns and 'short_traders' in df.columns:
             df = df[(df['long_traders'] > 0) | (df['short_traders'] > 0)]
             
-        # PnL 转为负值方便可视化
-        if 'short_unrealized_pnl' in df.columns:
-            df['short_unrealized_pnl'] = -df['short_unrealized_pnl'].abs()
-            
+
         return df
     except Exception as e:
         st.error(f"数据拉取失败: {e}")
@@ -96,112 +93,135 @@ with st.spinner("正在扫描链上战术数据..."):
 # 3. 独立卡片网格渲染
 # ==========================================
 if not df.empty:
-    metrics_config = [
-        {"col": "ls_ratio", "name": "多空人数比 - BTC", "color": "#14b8a6"}, 
-        {"col": "long_pos_usdt", "name": "多头持仓总额 - BTC", "color": "#f43f5e"}, 
-        {"col": "short_pos_usdt", "name": "空头持仓总额 - BTC", "color": "#10b981"}, 
+    ALL_METRICS = [
+        {"col": "ls_ratio", "name": "多空人数比", "color": "#14b8a6"}, 
+        {"col": "long_pos_usdt", "name": "多头持仓总额", "color": "#f43f5e"}, 
+        {"col": "short_pos_usdt", "name": "空头持仓总额", "color": "#10b981"}, 
         {"col": "long_unrealized_pnl", "name": "多头未实现盈亏", "color": "#3b82f6"}, 
         {"col": "short_unrealized_pnl", "name": "空头未实现盈亏", "color": "#8b5cf6"}, 
-        {"col": "funding_rate", "name": "资金费率", "color": "#f59e0b"} 
+        {"col": "funding_rate", "name": "资金费率", "color": "#f59e0b"},
+        {"col": "long_pnl_ratio", "name": "多头盈亏比", "color": "#10b981"},
+        {"col": "short_pnl_ratio", "name": "空头盈亏比", "color": "#f43f5e"},
+        {"col": "long_traders", "name": "多头人数", "color": "#3b82f6"},
+        {"col": "short_traders", "name": "空头人数", "color": "#8b5cf6"},
+        {"col": "total_traders", "name": "总人数", "color": "#64748b"},
+        {"col": "total_pos_usdt", "name": "总持仓总额", "color": "#0ea5e9"}
     ]
     
     # 过滤出当前 df 实际拥有的列
-    available_metrics = [m for m in metrics_config if m["col"] in df.columns]
+    available_metrics = [m for m in ALL_METRICS if m["col"] in df.columns]
+    
+    # 根据用户要求，将默认启动的 6 个指标固定为以下内容（上下对齐，多空对比）
+    default_cols = [
+        "long_pnl_ratio", "long_traders", "long_unrealized_pnl",
+        "short_pnl_ratio", "short_traders", "short_unrealized_pnl"
+    ]
     
     # 创建 3 列布局
     cols = st.columns(3)
     
-    for i, config in enumerate(available_metrics):
-        metric_col = config["col"]
-        metric_name = config["name"]
-        metric_color = config["color"]
-        
-        # 颜色转换函数：Hex to RGBA
-        def hex_to_rgba(hex_color, alpha=0.2):
-            hex_color = hex_color.lstrip('#')
-            if len(hex_color) == 6:
-                r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-                return f'rgba({r},{g},{b},{alpha})'
-            return hex_color
-
-        # 1. 创建独立的双 Y 轴图表
-        fig = make_subplots(specs=[[{"secondary_y": True}]])
-        
-        # 2. 主 Y 轴：指标区域图
-        fig.add_trace(
-            go.Scatter(
-                x=df["timestamp"], 
-                y=df[metric_col],
-                name=metric_name, 
-                mode='lines',
-                line=dict(color=metric_color, width=2),
-                fill='tozeroy', 
-                fillcolor=hex_to_rgba(metric_color, 0.2) if '#' in metric_color else metric_color.replace(')', ', 0.2)').replace('rgb', 'rgba'),
-                hovertemplate=f"%{{y:,.4f}}<extra></extra>"
-            ),
-            secondary_y=False,
-        )
-        
-        # 3. 次 Y 轴：BTC 价格折线图 (深红色)
-        fig.add_trace(
-            go.Scatter(
-                x=df["timestamp"], 
-                y=df["current_price"],
-                name="BTC 价格", 
-                mode='lines',
-                line=dict(color='#900C3F', width=2),
-                hovertemplate="%{y:,.2f} USDT<extra></extra>"
-            ),
-            secondary_y=True,
-        )
-        
-        # 4. 设置布局和清爽亮色主题
-        fig.update_layout(
-            title=dict(
-                text=f"<b>{metric_name}</b> vs BTC",
-                font=dict(size=16, color='#333333'),
-                x=0.01,
-                y=0.95
-            ),
-            height=450,
-            hovermode="x unified",
-            showlegend=False,
-            margin=dict(l=10, r=10, t=50, b=10),
-            paper_bgcolor="#ffffff",
-            plot_bgcolor="#ffffff",
-            font=dict(color="#333333"),
-            hoverlabel=dict(
-                bgcolor="rgba(255, 255, 255, 0.95)",
-                bordercolor="#e5e7eb",
-                font=dict(color="#333333", size=13)
-            )
-        )
-        
-        # 5. X 轴开启 rangeslider 和样式
-        fig.update_xaxes(
-            showgrid=False,
-            zeroline=False,
-            rangeslider_visible=True,
-            rangeslider=dict(thickness=0.08, bgcolor='#f8f9fa'),
-            tickformat="%m-%d %H:%M",
-            hoverformat="%Y-%m-%d %H:%M:%S",
-            color="#6b7280"
-        )
-        
-        # 主副 Y 轴网格线设置 (极浅的水平线)
-        fig.update_yaxes(
-            showgrid=True, gridcolor="#f3f4f6", zeroline=True, zerolinecolor="#e5e7eb",
-            color=metric_color, secondary_y=False,
-            showticklabels=True
-        )
-        fig.update_yaxes(
-            showgrid=False, zeroline=False, 
-            color="#900C3F", secondary_y=True,
-            showticklabels=True
-        )
-        
-        # 将图表渲染到对应的网格列中
+    for i in range(6):
         with cols[i % 3]:
+            # 找到默认指标在下拉菜单中的索引
+            target_col = default_cols[i] if i < len(default_cols) else available_metrics[0]["col"]
+            def_idx = 0
+            for idx, m in enumerate(available_metrics):
+                if m["col"] == target_col:
+                    def_idx = idx
+                    break
+                    
+            # 渲染独立的下拉菜单 (替换原有的静态标题)
+            selected_metric = st.selectbox(
+                "指标",
+                options=available_metrics,
+                format_func=lambda x: f"{x['name']} vs BTC",
+                index=def_idx,
+                key=f"chart_metric_{i}",
+                label_visibility="collapsed"
+            )
+            
+            metric_col = selected_metric["col"]
+            metric_name = selected_metric["name"]
+            metric_color = selected_metric["color"]
+        
+            # 颜色转换函数：Hex to RGBA
+            def hex_to_rgba(hex_color, alpha=0.2):
+                hex_color = hex_color.lstrip('#')
+                if len(hex_color) == 6:
+                    r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+                    return f'rgba({r},{g},{b},{alpha})'
+                return hex_color
+
+            # 1. 创建独立的双 Y 轴图表
+            fig = make_subplots(specs=[[{"secondary_y": True}]])
+        
+            # 2. 主 Y 轴：指标柱状图
+            fig.add_trace(
+                go.Bar(
+                    x=df["timestamp"], 
+                    y=df[metric_col],
+                    name=metric_name, 
+                    marker_color=metric_color,
+                    opacity=0.75,
+                    width=1000 * 60 * 4, # 强制柱子宽度为 4 分钟 (假设5分钟采集一次)，避免时间轴上柱子太细
+                    hovertemplate=f"%{{y:,.4f}}<extra></extra>"
+                ),
+                secondary_y=False,
+            )
+        
+            # 3. 次 Y 轴：BTC 价格折线图 (深红色)
+            fig.add_trace(
+                go.Scatter(
+                    x=df["timestamp"], 
+                    y=df["current_price"],
+                    name="BTC 价格", 
+                    mode='lines',
+                    line=dict(color='#900C3F', width=2),
+                    hovertemplate="%{y:,.2f} USDT<extra></extra>"
+                ),
+                secondary_y=True,
+            )
+        
+            # 4. 设置布局和清爽亮色主题
+            fig.update_layout(
+                height=450,
+                hovermode="x unified",
+                showlegend=False,
+                margin=dict(l=10, r=10, t=20, b=10), # 顶部边距调小，因为有了下拉菜单
+                paper_bgcolor="#ffffff",
+                plot_bgcolor="#ffffff",
+                font=dict(color="#333333"),
+                hoverlabel=dict(
+                    bgcolor="rgba(255, 255, 255, 0.95)",
+                    bordercolor="#e5e7eb",
+                    font=dict(color="#333333", size=13)
+                )
+            )
+        
+            # 5. X 轴开启 rangeslider 和样式
+            fig.update_xaxes(
+                showgrid=False,
+                zeroline=False,
+                rangeslider_visible=True,
+                rangeslider=dict(thickness=0.08, bgcolor='#f8f9fa'),
+                tickformat="%m-%d %H:%M",
+                hoverformat="%Y-%m-%d %H:%M:%S",
+                color="#6b7280"
+            )
+        
+            # 主副 Y 轴网格线设置 (极浅的水平线)
+            fig.update_yaxes(
+                showgrid=True, gridcolor="#f3f4f6", zeroline=True, zerolinecolor="#e5e7eb",
+                color=metric_color, secondary_y=False,
+                showticklabels=True
+            )
+            fig.update_yaxes(
+                showgrid=False, zeroline=False, 
+                color="#900C3F", secondary_y=True,
+                showticklabels=True
+            )
+        
+            # 将图表渲染到当前的上下文中 (已在 with cols[i % 3] 中)
             st.plotly_chart(fig, use_container_width=True)
 
 else:
