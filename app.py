@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import streamlit.components.v1 as components
 import json
 import os
 
@@ -117,6 +118,11 @@ if not df.empty:
         "short_pnl_ratio", "short_traders", "short_unrealized_pnl"
     ]
     
+    # 计算默认的 24 小时显示区间
+    x_max = df["timestamp"].max()
+    x_min = x_max - pd.Timedelta(hours=24)
+    x_full_min = df["timestamp"].min()
+    
     # 创建 3 列布局
     cols = st.columns(3)
     
@@ -202,8 +208,9 @@ if not df.empty:
             fig.update_xaxes(
                 showgrid=False,
                 zeroline=False,
+                range=[x_min, x_max], # 默认只显示最近 24 小时，让图表撑大
                 rangeslider_visible=True,
-                rangeslider=dict(thickness=0.08, bgcolor='#f8f9fa'),
+                rangeslider=dict(thickness=0.08, bgcolor='#f8f9fa', range=[x_full_min, x_max]), # 下方的导航条仍然保留所有历史数据
                 tickformat="%m-%d %H:%M",
                 hoverformat="%Y-%m-%d %H:%M:%S",
                 color="#6b7280"
@@ -226,3 +233,19 @@ if not df.empty:
 
 else:
     st.warning("暂无数据，请检查网络或配置。")
+
+# ==========================================
+# 4. 自动化：每 6 分钟自动刷新全局页面
+# ==========================================
+components.html(
+    """
+    <script>
+    // 360000 毫秒 = 6 分钟
+    setTimeout(function(){
+        window.parent.location.reload();
+    }, 360000);
+    </script>
+    """,
+    height=0,
+    width=0,
+)
