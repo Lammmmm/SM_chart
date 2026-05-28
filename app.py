@@ -57,7 +57,8 @@ def fetch_and_process_data():
         cols_to_convert = [
             'current_price', 'long_traders', 'short_traders', 'total_traders',
             'long_pos_usdt', 'short_pos_usdt', 'total_pos_usdt',
-            'long_unrealized_pnl', 'short_unrealized_pnl', 'funding_rate', 'ls_ratio'
+            'long_unrealized_pnl', 'short_unrealized_pnl', 'funding_rate', 'ls_ratio',
+            'long_pnl_ratio', 'short_pnl_ratio'
         ]
         for col in cols_to_convert:
             if col in df.columns:
@@ -164,15 +165,31 @@ if not df.empty:
             xaxis='x', yaxis='y3'
         ))
 
-    # ── Row 4: 多头占比 ──────────────────────────────────────────────────
+    # ── Row 4: 比例指标（多头占比 + 盈亏比）──────────────────────────────
     fig.add_trace(go.Scatter(
         x=df["timestamp"], y=df["long_percent"],
         name="多头占比", mode='lines',
         line=dict(color="#F59E0B", width=1),
-        fill='tozeroy', fillcolor='rgba(245,158,11,0.9)',
+        fill='tozeroy', fillcolor='rgba(245,158,11,0.3)',
         hovertemplate="%{y:.1f}%<extra></extra>",
         xaxis='x', yaxis='y4'
     ))
+    if 'long_pnl_ratio' in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df["timestamp"], y=df["long_pnl_ratio"],
+            name="多头盈亏比", mode='lines',
+            line=dict(color="#00E676", width=1.5, dash='dot'),
+            hovertemplate="多头盈亏比: %{y:.2f}%<extra></extra>",
+            xaxis='x', yaxis='y4'
+        ))
+    if 'short_pnl_ratio' in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df["timestamp"], y=df["short_pnl_ratio"],
+            name="空头盈亏比", mode='lines',
+            line=dict(color="#FF1744", width=1.5, dash='dot'),
+            hovertemplate="空头盈亏比: %{y:.2f}%<extra></extra>",
+            xaxis='x', yaxis='y4'
+        ))
 
     # ── Layout ───────────────────────────────────────────────────────────
     fig.update_layout(
@@ -217,11 +234,10 @@ if not df.empty:
             showgrid=True, gridcolor=GC,
             zeroline=True, zerolinecolor=ZLC, showspikes=False,
         ),
-        # y4 (Row 4 - 多头占比，最底部)
+        # y4 (Row 4 - 比例指标，最底部)
         yaxis4=dict(
             domain=D[4], anchor='x',
-            title=dict(text="多头占比(%)"),
-            range=[0, 100],
+            title=dict(text="比率指标(%)"),
             showgrid=True, gridcolor=GC, zeroline=False, showspikes=False,
         ),
         # y5 (Row 2 副轴 - 多头总资金，右侧)
