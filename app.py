@@ -8,6 +8,12 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 
+from backtest_page import render_backtest_page
+import data_client as shared_data_client
+import features as shared_features
+import signals as shared_signals
+from ui_shell import apply_common_style, render_console_header, render_workspace_switch
+
 
 config_path = "config.json"
 POCKETBASE_URL = "http://YOUR_POCKETBASE_IP:8090"
@@ -56,52 +62,13 @@ SIGNAL_META = {
 
 
 st.set_page_config(
-    page_title="Smart Money 转折信号雷达",
+    page_title="Smart Money 统一控制台",
     page_icon="📡",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-st.markdown(
-    """
-    <style>
-    .block-container {
-        padding-top: 1.2rem;
-        padding-bottom: 1rem;
-    }
-    .status-card {
-        background: linear-gradient(180deg, #151b23 0%, #0f141b 100%);
-        border: 1px solid #1f2937;
-        border-radius: 14px;
-        padding: 14px 16px;
-        min-height: 92px;
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
-    }
-    .status-label {
-        color: #8b949e;
-        font-size: 0.82rem;
-        margin-bottom: 0.35rem;
-    }
-    .status-value {
-        font-size: 1.16rem;
-        font-weight: 700;
-        line-height: 1.35;
-    }
-    .status-sub {
-        color: #6b7280;
-        font-size: 0.76rem;
-        margin-top: 0.3rem;
-    }
-    [data-testid="stSidebar"] {
-        background: #0f141b;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-st.title("📡 Smart Money 转折信号雷达")
-st.caption("信号仅用于观察与预警，不构成确定性买卖点，也不承诺预测准确率。")
+apply_common_style()
 
 
 def has_col(df: pd.DataFrame, col: str) -> bool:
@@ -1789,40 +1756,86 @@ def build_main_figure(df: pd.DataFrame, options: Dict[str, object]) -> go.Figure
     return fig
 
 
-options = build_sidebar_options()
+# Shared module bindings: keep the radar UI intact while letting app.py reuse the
+# extracted data/feature/signal logic used by the backtest platform.
+SIGNAL_META = shared_signals.SIGNAL_META
+has_col = shared_features.has_col
+get_series = shared_features.get_series
+safe_divide = shared_features.safe_divide
+rolling_zscore = shared_features.rolling_zscore
+normalize_ls_ratio = shared_features.normalize_ls_ratio
+suppress_repeated_events = shared_signals.suppress_repeated_events
+consecutive_true_count = shared_signals.consecutive_true_count
+maybe_get_event_col = shared_signals.maybe_get_event_col
+build_reason_series = shared_signals.build_reason_series
+get_trade_meaning = shared_signals.get_trade_meaning
+add_derived_metrics = shared_features.add_derived_metrics
+add_signal_columns = shared_signals.add_signal_columns
 
-with st.spinner("正在扫描 Smart Money 数据..."):
-    raw_df = fetch_and_process_data()
 
-if raw_df.empty:
-    st.warning("暂无可用数据，请检查 PocketBase 地址、网络连接或数据采集状态。")
-    st.stop()
+@st.cache_data(ttl=60)
+def load_shared_radar_data() -> pd.DataFrame:
+    return shared_data_client.fetch_smart_money_data()
 
-metrics_df = add_derived_metrics(raw_df, options)
-signal_df = add_signal_columns(metrics_df, options)
-display_df = add_time_range_filter(signal_df, str(options["range_label"]))
 
-if display_df.empty:
-    st.warning("当前筛选范围内没有数据，请扩大时间范围后重试。")
-    st.stop()
+def fetch_and_process_data() -> pd.DataFrame:
+    try:
+        return load_shared_radar_data()
+    except Exception as exc:
+        st.error(f"数据拉取或清洗失败: {exc}")
+        return pd.DataFrame()
 
-tactical_summary = build_tactical_summary(display_df)
-render_tactical_summary(tactical_summary)
 
-build_status_cards(display_df)
-st.caption("最近信号 = 最近一次 event｜当前预警状态 = 当前 watch｜Smart Score = 当前综合偏向。三者含义不同，不应混用。")
+def render_radar_page() -> None:
+    render_console_header(
+        "统一控制台 / 实时雷达",
+        "📡 Smart Money 转折信号雷达",
+        "信号仅用于观察与预警，不构成确定性买卖点，也不承诺预测准确率。",
+    )
+    st.caption("当前在统一控制台内查看实时雷达，侧栏顶部可随时切到策略回测。")
 
-main_figure = build_main_figure(display_df, options)
-st.plotly_chart(main_figure, use_container_width=True, config={"displaylogo": False})
+    options = build_sidebar_options()
 
-if options.get("show_debug_indicators", False):
-    render_debug_panel(display_df)
+    with st.spinner("正在扫描 Smart Money 数据..."):
+        raw_df = fetch_and_process_data()
 
-if options["show_event_table"]:
-    st.subheader("最近信号事件")
-    table_df = build_signal_table(display_df)
-    if table_df.empty:
-        st.info("当前范围内还没有触发信号。")
-    else:
-        display_table = format_signal_table_for_mode(table_df, str(options.get("mode", "作战模式")))
-        st.dataframe(display_table, use_container_width=True)
+    if raw_df.empty:
+        st.warning("暂无可用数据，请检查 PocketBase 地址、网络连接或数据采集状态。")
+        st.stop()
+
+    metrics_df = add_derived_metrics(raw_df, options)
+    signal_df = add_signal_columns(metrics_df, options)
+    display_df = add_time_range_filter(signal_df, str(options["range_label"]))
+
+    if display_df.empty:
+        st.warning("当前筛选范围内没有数据，请扩大时间范围后重试。")
+        st.stop()
+
+    tactical_summary = build_tactical_summary(display_df)
+    render_tactical_summary(tactical_summary)
+
+    build_status_cards(display_df)
+    st.caption("最近信号 = 最近一次 event｜当前预警状态 = 当前 watch｜Smart Score = 当前综合偏向。三者含义不同，不应混用。")
+
+    main_figure = build_main_figure(display_df, options)
+    st.plotly_chart(main_figure, use_container_width=True, config={"displaylogo": False})
+
+    if options.get("show_debug_indicators", False):
+        render_debug_panel(display_df)
+
+    if options["show_event_table"]:
+        st.subheader("最近信号事件")
+        table_df = build_signal_table(display_df)
+        if table_df.empty:
+            st.info("当前范围内还没有触发信号。")
+        else:
+            display_table = format_signal_table_for_mode(table_df, str(options.get("mode", "作战模式")))
+            st.dataframe(display_table, use_container_width=True)
+
+
+selected_page = render_workspace_switch(default_page="实时雷达")
+
+if selected_page == "策略回测":
+    render_backtest_page(embedded_in_console=True)
+else:
+    render_radar_page()
