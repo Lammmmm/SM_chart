@@ -59,9 +59,11 @@ ALL_METRICS = [
 DEFAULT_METRIC_COLUMNS = [
     "long_pnl_ratio",
     "long_traders",
+    "long_pos_usdt",
     "long_avg_price",
     "short_pnl_ratio",
     "short_traders",
+    "short_pos_usdt",
     "short_avg_price",
 ]
 
@@ -448,7 +450,7 @@ def build_chart_figure(
         ),
         uirevision=f"smart_money_chart_{chart_index}",
         meta={
-            "smart_money_sync_group": "long" if chart_index < 3 else "short",
+            "smart_money_sync_group": "long" if chart_index < 4 else "short",
             "smart_money_chart_index": chart_index,
         },
     )
@@ -753,14 +755,9 @@ else:
             "后台 5 分钟同步只更新本地 JSON，不会自动刷新图表。"
         )
 
-        columns = st.columns(3)
-        for index in range(6):
-            with columns[index % 3]:
-                target_column = (
-                    DEFAULT_METRIC_COLUMNS[index]
-                    if index < len(DEFAULT_METRIC_COLUMNS)
-                    else available_metrics[0]["col"]
-                )
+        columns = st.columns(4)
+        for index, target_column in enumerate(DEFAULT_METRIC_COLUMNS):
+            with columns[index % 4]:
                 default_index = next(
                     (
                         metric_index
