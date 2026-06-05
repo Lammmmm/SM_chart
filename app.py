@@ -214,14 +214,18 @@ def ensure_local_cache_exists() -> dict[str, Any]:
 def sync_incremental_records() -> dict[str, Any]:
     payload = load_local_cache()
     if payload is None:
-        return ensure_local_cache_exists()
+        created_payload = ensure_local_cache_exists()
+        created_payload["new_record_count"] = int(created_payload.get("record_count", 0) or 0)
+        return created_payload
 
     old_records = payload.get("records", [])
     latest_timestamp = payload.get("latest_timestamp") or get_latest_timestamp(old_records)
 
     if not latest_timestamp:
         records = fetch_smart_money_records()
-        return save_local_cache(records)
+        refreshed_payload = save_local_cache(records)
+        refreshed_payload["new_record_count"] = int(refreshed_payload.get("record_count", 0) or 0)
+        return refreshed_payload
 
     new_records = fetch_smart_money_records(since=str(latest_timestamp))
     if not new_records:
@@ -504,24 +508,41 @@ st.title("📈 Smart Money 宏观网格监控板")
 st.markdown("基于本地 JSON 缓存的指标与 BTC 价格交叉分析")
 
 controller = get_sync_controller()
+controller.start()
 
-with st.spinner("正在检查本地 JSON 缓存..."):
-    try:
-        cache_payload = ensure_local_cache_exists()
-        cache_error = None
-    except Exception as exc:
-        cache_payload = None
-        cache_error = exc
+startup_sync_result: dict[str, Any] = {}
+startup_sync_warning: str | None = None
+startup_sync_error: str | None = None
 
-if cache_error:
-    st.error(f"本地 JSON 初始化失败：{cache_error}")
+with st.spinner("启动中：正在按本地最新时间戳同步数据库增量..."):
+    cache_existed_before_startup = LOCAL_CACHE_PATH.exists()
+    startup_sync_result = controller.sync_now()
+    if startup_sync_result.get("error"):
+        if cache_existed_before_startup:
+            startup_sync_warning = str(startup_sync_result["error"])
+        else:
+            startup_sync_error = str(startup_sync_result["error"])
+
+if startup_sync_error:
+    st.error(f"本地 JSON 初始化失败，且无法从数据库拉取全量数据：{startup_sync_error}")
     st.stop()
+
+if startup_sync_warning:
+    st.warning(f"启动增量同步失败，已先使用本地 JSON 绘图：{startup_sync_warning}")
+elif startup_sync_result.get("skipped"):
+    st.info(startup_sync_result.get("reason", "同步任务正在运行，本次启动跳过增量同步"))
+else:
+    st.caption(
+        f"启动同步完成：新增 {startup_sync_result.get('new_record_count', 0)} 条，"
+        f"本地总数 {startup_sync_result.get('record_count', '-')}, "
+        f"最新时间 {startup_sync_result.get('latest_timestamp') or '-'}。"
+    )
 
 control_col1, control_col2, control_col3 = st.columns([1, 1, 4])
 with control_col1:
     refresh_panel = st.button("刷新面板", type="primary", help="重新读取根目录 smart_money_cache.json，并重绘全部图表")
 with control_col2:
-    sync_now = st.button("立即同步数据库", help="手动从数据库拉取 timestamp 之后的新数据，写入本地 JSON；不会自动重绘，仍需点击刷新面板")
+    sync_now = st.button("立即同步数据库", help="立刻按本地 latest_timestamp 拉取新增数据写入 JSON，并在本次运行中重绘图表")
 
 if sync_now:
     result = controller.sync_now()
@@ -564,6 +585,8 @@ with st.expander("本地 JSON 与后台同步状态", expanded=False):
             "cache_updated_at": cache_payload.get("updated_at"),
             "cache_latest_timestamp": cache_payload.get("latest_timestamp"),
             "cache_record_count": cache_payload.get("record_count"),
+            "startup_new_records": startup_sync_result.get("new_record_count"),
+            "startup_latest_timestamp": startup_sync_result.get("latest_timestamp"),
             "background_started_at": status.get("started_at"),
             "background_last_checked_at": status.get("last_checked_at"),
             "background_last_success_at": status.get("last_success_at"),
@@ -584,7 +607,8 @@ else:
 
         st.caption(
             f"当前图表展示全量本地数据：{x_min:%Y-%m-%d %H:%M:%S} 至 {x_max:%Y-%m-%d %H:%M:%S}。"
-            "后台只更新本地 JSON，不会自动刷新图表；点击“刷新面板”后才会重读本地文件并重绘。"
+            "启动和手动同步会先按 latest_timestamp 追加数据库新增数据到本地 JSON，再读取本地文件绘图；"
+            "后台 5 分钟同步只更新本地 JSON，不会自动刷新图表。"
         )
 
         columns = st.columns(3)
