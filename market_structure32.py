@@ -83,7 +83,8 @@ CASE_MAP: Dict[Tuple[str, str, str, str, str], Dict[str, object]] = {
     for no, p, la, lp, sa, sp, name, stance, strength, interpretation in _CASE_ROWS
 }
 
-STANCE_TEXT = {"long": "多头机会提示", "short": "空头机会提示", "neutral": "观望提示"}
+STANCE_TEXT = {"long": "买点提示", "short": "卖点提示", "neutral": "观望提示"}
+SIGNAL_LEVEL_PREFIX = {"long": "买", "short": "卖", "neutral": "观望"}
 STANCE_COLOR = {"long": "#00C087", "short": "#F6465D", "neutral": "#F0B90B"}
 STANCE_SYMBOL = {"long": "triangle-up", "short": "triangle-down", "neutral": "circle"}
 
@@ -110,6 +111,16 @@ def _pct_text(value: object) -> str:
     return f"{float(numeric) * 100:+.2f}%"
 
 
+def _level_label(stance: object, strength: object) -> str:
+    numeric = pd.to_numeric(strength, errors="coerce")
+    if pd.isna(numeric):
+        return ""
+    level = int(max(min(float(numeric), 5), 0))
+    if level <= 0:
+        return ""
+    return f"{SIGNAL_LEVEL_PREFIX.get(str(stance), '观望')}{level}"
+
+
 def _empty_columns(df: pd.DataFrame, reason: str) -> pd.DataFrame:
     df["structure32_key"] = ""
     df["structure32_case_no"] = pd.Series(pd.NA, index=df.index, dtype="Int64")
@@ -117,6 +128,7 @@ def _empty_columns(df: pd.DataFrame, reason: str) -> pd.DataFrame:
     df["structure32_stance"] = "neutral"
     df["structure32_action"] = "无信号"
     df["structure32_strength"] = 0
+    df["structure32_level_label"] = ""
     df["structure32_interpretation"] = reason
     df["structure32_reason"] = reason
     df["structure32_watch"] = False
@@ -189,10 +201,12 @@ def add_structure32_columns(
     out["structure32_stance"] = [str(case["stance"]) if case else "neutral" for case in cases]
     out["structure32_action"] = [STANCE_TEXT.get(str(case["stance"]), "观望提示") if case else "无信号" for case in cases]
     out["structure32_strength"] = [int(case["strength"]) if case else 0 for case in cases]
+    out["structure32_level_label"] = [_level_label(case["stance"], case["strength"]) if case else "" for case in cases]
     out["structure32_interpretation"] = [str(case["interpretation"]) if case else "五个维度中至少一个维度未超过阈值。" for case in cases]
     out["structure32_reason"] = [
         (
-            f"{STANCE_TEXT.get(str(case['stance']), '观望提示')}｜强度 {int(case['strength'])}/5｜"
+            f"{_level_label(case['stance'], case['strength'])}｜{STANCE_TEXT.get(str(case['stance']), '观望提示')}｜"
+            f"强度 {int(case['strength'])}/5，数字越大越可靠、越强｜"
             f"第{int(case['case_no'])}种：{case['name']}。"
             f"结构=价格{key[0]} + 多头均价{key[1]} + 多头仓位{key[2]} + 空头均价{key[3]} + 空头仓位{key[4]}。"
             f"原理：{case['interpretation']}"
@@ -215,6 +229,7 @@ def _hover_data(rows: pd.DataFrame) -> np.ndarray:
             row.get("structure32_name", ""),
             row.get("structure32_action", ""),
             row.get("structure32_strength", 0),
+            row.get("structure32_level_label", ""),
             _pct_text(row.get("structure32_price_change_pct")),
             _pct_text(row.get("structure32_long_avg_change_pct")),
             _pct_text(row.get("structure32_long_pos_change_pct")),
@@ -240,7 +255,7 @@ def build_structure32_figure(df: pd.DataFrame) -> go.Figure:
     ))
 
     events = plot_df[plot_df.get("structure32_watch_event", False).fillna(False)].copy()
-    for stance, label in [("long", "多头机会"), ("short", "空头机会"), ("neutral", "观望")]:
+    for stance, label in [("long", "买点"), ("short", "卖点"), ("neutral", "观望")]:
         rows = events[events["structure32_stance"] == stance]
         if rows.empty:
             continue
@@ -249,7 +264,7 @@ def build_structure32_figure(df: pd.DataFrame) -> go.Figure:
             y=rows["current_price"],
             name=label,
             mode="markers+text",
-            text=[f"{int(v)}/5" for v in rows["structure32_strength"].fillna(0)],
+            text=rows["structure32_level_label"].fillna("").astype(str).tolist(),
             textposition="top center",
             textfont=dict(color=STANCE_COLOR[stance], size=11),
             marker=dict(color=STANCE_COLOR[stance], size=11, symbol=STANCE_SYMBOL[stance], line=dict(color="#0B0E11", width=1)),
@@ -260,13 +275,14 @@ def build_structure32_figure(df: pd.DataFrame) -> go.Figure:
                 "<br>第几种结构 第%{customdata[0]}种"
                 "<br>结构名称 %{customdata[1]}"
                 "<br>提示方向 %{customdata[2]}"
-                "<br>信号强度 %{customdata[3]}/5"
-                "<br>价格变化率 %{customdata[4]}"
-                "<br>多头均价变化率 %{customdata[5]}"
-                "<br>多头仓位变化率 %{customdata[6]}"
-                "<br>空头均价变化率 %{customdata[7]}"
-                "<br>空头仓位变化率 %{customdata[8]}"
-                "<br>背后原理解释 %{customdata[9]}"
+                "<br>信号等级 %{customdata[4]}"
+                "<br>信号强度 %{customdata[3]}/5（数字越大越可靠）"
+                "<br>价格变化率 %{customdata[5]}"
+                "<br>多头均价变化率 %{customdata[6]}"
+                "<br>多头仓位变化率 %{customdata[7]}"
+                "<br>空头均价变化率 %{customdata[8]}"
+                "<br>空头仓位变化率 %{customdata[9]}"
+                "<br>背后原理解释 %{customdata[10]}"
                 "<extra></extra>"
             ),
         ))
@@ -319,7 +335,7 @@ def install_structure32_streamlit_hook(df: pd.DataFrame) -> None:
 
         _RENDERED = True
         st.subheader("32种盘口结构提示图")
-        st.caption("按首次出现的 价格涨跌 + 多空均价涨跌 + 多空仓位升降 组合标记。强度 1-5 表示结构强弱，不代表确定性结果。")
+        st.caption("按首次出现的 价格涨跌 + 多空均价涨跌 + 多空仓位升降 组合标记。图上显示为 买1/卖1/观望1 等等级标签，数字越大表示结构越强、可靠度越高。")
         _ORIGINAL_PLOTLY_CHART(build_structure32_figure(plot_df), use_container_width=True, config={"displaylogo": False})
         latest = plot_df.iloc[-1]
         st.info(str(latest.get("structure32_reason", "当前没有完整触发32结构。")))

@@ -765,7 +765,7 @@ else:
         st.subheader("32种盘口结构提示图")
         st.caption(
             "按首次出现的 价格涨跌 + 多空均价涨跌 + 多空仓位升降 组合标记。"
-            "强度 1-5 表示结构强弱，不代表确定性结果。"
+            "图上显示为 买1/卖1/观望1 等等级标签，数字越大表示结构越强、可靠度越高。"
         )
         st.plotly_chart(
             build_structure32_figure(structure32_df),
