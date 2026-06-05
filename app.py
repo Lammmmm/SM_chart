@@ -196,6 +196,35 @@ def prepare_dataframe(records: list[dict[str, Any]]) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
+def to_chart_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert PocketBase raw records into the same timestamp space used by the first chart render.
+
+    The API cursor still uses source_timestamp/latest_timestamp, but Plotly x values use the
+    Asia/Shanghai display timestamp. This prevents mixed UTC/local x values after auto update.
+    """
+    df = prepare_dataframe(records)
+    if df.empty:
+        return []
+
+    chart_records: list[dict[str, Any]] = []
+    for row in df.to_dict(orient="records"):
+        record: dict[str, Any] = {
+            "timestamp": row["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
+            if hasattr(row["timestamp"], "strftime")
+            else str(row["timestamp"]),
+            "source_timestamp": row.get("source_timestamp"),
+        }
+        for column in NUMERIC_COLUMNS:
+            if column in row:
+                value = row[column]
+                if pd.isna(value):
+                    record[column] = 0
+                else:
+                    record[column] = float(value)
+        chart_records.append(record)
+    return chart_records
+
+
 @st.cache_data(ttl=60)
 def fetch_and_process_data() -> pd.DataFrame:
     started_at = time.perf_counter()
@@ -220,24 +249,25 @@ def build_chart_data_response(since: str | None, metric: str | None) -> dict[str
     fields = build_requested_fields(metric)
     records = fetch_smart_money_records(since=since, fields=fields)
     latest_timestamp = records[-1]["timestamp"] if records else since
+    chart_records = to_chart_records(records)
     duration_ms = int((time.perf_counter() - started_at) * 1000)
 
     emit_server_log(
         "处理同端口增量接口请求",
         since=since or "-",
         metric=metric or "all",
-        appended_rows=len(records),
+        appended_rows=len(chart_records),
         latest=latest_timestamp or "-",
         cost_ms=duration_ms,
     )
 
     return {
-        "has_new_data": bool(records),
+        "has_new_data": bool(chart_records),
         "latest_timestamp": latest_timestamp,
-        "append_data": records,
+        "append_data": chart_records,
         "metric": metric,
         "server_time": datetime.now().isoformat(timespec="seconds"),
-        "record_count": len(records),
+        "record_count": len(chart_records),
     }
 
 
@@ -515,551 +545,490 @@ def render_incremental_refresh_script(
         "initialLogEntries": initial_log_entries,
     }
 
-    components.html(
-        f"""
-        <script>
-        (function() {{
-          const payload = {json.dumps(payload, ensure_ascii=False)};
-          const STATUS_NODE_ID = "smart-money-refresh-status";
-          const LOG_PANEL_ID = "smart-money-log-panel";
-          const MAX_LOG_ENTRIES = 18;
-          const state = {{
-            logEntries: [],
-            totalAppendedRecords: 0,
-            successfulUpdates: 0,
-            lastAttemptAt: null,
-            lastSuccessAt: null,
-            lastFailureAt: null,
-            lastResult: "等待首次轮询"
-          }};
-          let lastTimestamp = payload.initialLatestTimestamp;
-          let isUpdating = false;
-          let timerId = null;
-          let bootstrapped = false;
+    script = """
+    <script>
+    (function() {
+      const payload = __SMART_MONEY_PAYLOAD__;
+      const parentWindow = window.parent || window;
+      const controllerKey = "__smartMoneyIncrementalRefreshController";
+      const STATUS_NODE_ID = "smart-money-refresh-status";
+      const LOG_PANEL_ID = "smart-money-log-panel";
+      const MAX_LOG_ENTRIES = 18;
 
-          function getParentDocument() {{
-            return window.parent && window.parent.document ? window.parent.document : document;
-          }}
+      if (parentWindow[controllerKey] && parentWindow[controllerKey].timerId) {
+        parentWindow.clearInterval(parentWindow[controllerKey].timerId);
+      }
 
-          function getPlotly() {{
-            return window.parent && window.parent.Plotly ? window.parent.Plotly : window.Plotly;
-          }}
+      const state = {
+        logEntries: [],
+        totalAppendedRecords: 0,
+        successfulUpdates: 0,
+        lastAttemptAt: null,
+        lastSuccessAt: null,
+        lastFailureAt: null,
+        lastResult: "等待首次轮询"
+      };
 
-          function getSmartMoneyCharts() {{
-            const doc = getParentDocument();
-            return Array.from(
-              doc.querySelectorAll('[data-testid="stPlotlyChart"] .js-plotly-plot')
-            ).filter((chart) => chart && chart.layout && chart.layout.meta && chart.layout.meta.smart_money_config);
-          }}
+      const controller = {
+        timerId: null,
+        lastTimestamp: payload.initialLatestTimestamp,
+        isUpdating: false,
+        bootstrapped: false
+      };
+      parentWindow[controllerKey] = controller;
 
-          function ensureStatusNode() {{
-            const doc = getParentDocument();
-            let node = doc.getElementById(STATUS_NODE_ID);
-            if (!node) {{
-              node = doc.createElement("div");
-              node.id = STATUS_NODE_ID;
-              Object.assign(node.style, {{
-                position: "fixed",
-                top: "18px",
-                right: "24px",
-                zIndex: "9999",
-                padding: "8px 12px",
-                borderRadius: "10px",
-                background: "rgba(239, 68, 68, 0.92)",
-                color: "#ffffff",
-                fontSize: "13px",
-                fontFamily: "system-ui, sans-serif",
-                boxShadow: "0 10px 30px rgba(15, 23, 42, 0.18)",
-                opacity: "0",
-                pointerEvents: "none",
-                transform: "translateY(-4px)",
-                transition: "opacity 0.2s ease, transform 0.2s ease"
-              }});
-              doc.body.appendChild(node);
-            }}
-            return node;
-          }}
+      function getParentDocument() {
+        return parentWindow.document || document;
+      }
 
-          function showStatus(message) {{
-            const node = ensureStatusNode();
-            node.textContent = message;
-            node.style.opacity = "1";
-            node.style.transform = "translateY(0)";
-          }}
+      function getPlotly() {
+        return parentWindow.Plotly || window.Plotly;
+      }
 
-          function hideStatus() {{
-            const node = ensureStatusNode();
-            node.style.opacity = "0";
-            node.style.transform = "translateY(-4px)";
-          }}
+      function getSmartMoneyCharts() {
+        const doc = getParentDocument();
+        return Array.from(
+          doc.querySelectorAll('[data-testid="stPlotlyChart"] .js-plotly-plot')
+        ).filter((chart) => chart && chart.layout && chart.layout.meta && chart.layout.meta.smart_money_config);
+      }
 
-          function parseDateMs(value) {{
-            const parsed = new Date(value).getTime();
-            return Number.isNaN(parsed) ? null : parsed;
-          }}
+      function ensureStatusNode() {
+        const doc = getParentDocument();
+        let node = doc.getElementById(STATUS_NODE_ID);
+        if (!node) {
+          node = doc.createElement("div");
+          node.id = STATUS_NODE_ID;
+          Object.assign(node.style, {
+            position: "fixed",
+            top: "18px",
+            right: "24px",
+            zIndex: "9999",
+            padding: "8px 12px",
+            borderRadius: "10px",
+            background: "rgba(239, 68, 68, 0.92)",
+            color: "#ffffff",
+            fontSize: "13px",
+            fontFamily: "system-ui, sans-serif",
+            boxShadow: "0 10px 30px rgba(15, 23, 42, 0.18)",
+            opacity: "0",
+            pointerEvents: "none",
+            transform: "translateY(-4px)",
+            transition: "opacity 0.2s ease, transform 0.2s ease"
+          });
+          doc.body.appendChild(node);
+        }
+        return node;
+      }
 
-          function toNumber(value) {{
-            const parsed = Number(value);
-            return Number.isFinite(parsed) ? parsed : 0;
-          }}
+      function showStatus(message) {
+        const node = ensureStatusNode();
+        node.textContent = message;
+        node.style.opacity = "1";
+        node.style.transform = "translateY(0)";
+      }
 
-          function toTraceArray(value) {{
-            if (Array.isArray(value)) {{
-              return value.slice();
-            }}
-            if (!value) {{
-              return [];
-            }}
-            if (ArrayBuffer.isView(value)) {{
-              return Array.from(value);
-            }}
-            if (typeof value !== "string" && typeof value[Symbol.iterator] === "function") {{
-              return Array.from(value);
-            }}
-            if (typeof value === "object" && Number.isFinite(value.length)) {{
-              return Array.from(value);
-            }}
-            return [];
-          }}
+      function hideStatus() {
+        const node = ensureStatusNode();
+        node.style.opacity = "0";
+        node.style.transform = "translateY(-4px)";
+      }
 
-          function coerceXValueLike(sample, value) {{
-            if (sample instanceof Date) {{
-              return new Date(value);
-            }}
-            if (typeof sample === "number") {{
-              const parsedMs = parseDateMs(value);
-              return parsedMs === null ? Number(value) : parsedMs;
-            }}
-            if (typeof sample === "string") {{
-              return String(value);
-            }}
-            return value;
-          }}
+      function parseDateMs(value) {
+        if (value instanceof Date) {
+          const ms = value.getTime();
+          return Number.isNaN(ms) ? null : ms;
+        }
+        if (typeof value === "number") {
+          return Number.isFinite(value) ? value : null;
+        }
+        const parsed = new Date(value).getTime();
+        return Number.isNaN(parsed) ? null : parsed;
+      }
 
-          function ensureChartState(chart) {{
-            if (chart.__smartMoneyState) {{
-              return chart.__smartMoneyState;
-            }}
+      function toNumber(value) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : 0;
+      }
 
-            const metricTrace = chart.data[0];
-            const priceTrace = chart.data[1];
-            const metricX = toTraceArray(metricTrace && metricTrace.x);
-            const metricY = toTraceArray(metricTrace && metricTrace.y);
-            const priceX = toTraceArray(priceTrace && priceTrace.x);
-            const priceY = toTraceArray(priceTrace && priceTrace.y);
-            const metricColorSource = metricTrace && metricTrace.marker ? metricTrace.marker.color : null;
-            const metricColors = toTraceArray(metricColorSource);
+      function toTraceArray(value) {
+        if (Array.isArray(value)) {
+          return value.slice();
+        }
+        if (!value) {
+          return [];
+        }
+        if (ArrayBuffer.isView(value)) {
+          return Array.from(value);
+        }
+        if (typeof value !== "string" && typeof value[Symbol.iterator] === "function") {
+          return Array.from(value);
+        }
+        if (typeof value === "object" && Number.isFinite(value.length)) {
+          return Array.from(value);
+        }
+        return [];
+      }
 
-            chart.__smartMoneyState = {{
-              metricX,
-              metricY,
-              priceX,
-              priceY,
-              metricColors,
-            }};
-            return chart.__smartMoneyState;
-          }}
+      function formatMoment(value) {
+        if (!value) {
+          return "-";
+        }
+        const date = new Date(value);
+        return Number.isNaN(date.getTime())
+          ? String(value)
+          : date.toLocaleString("zh-CN", {
+              hour12: false,
+              month: "2-digit",
+              day: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit"
+            });
+      }
 
-          function formatMoment(value) {{
-            if (!value) {{
-              return "-";
-            }}
-            const date = new Date(value);
-            return Number.isNaN(date.getTime())
-              ? String(value)
-              : date.toLocaleString("zh-CN", {{
-                  hour12: false,
-                  month: "2-digit",
-                  day: "2-digit",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                  second: "2-digit"
-                }});
-          }}
+      function buildDetailString(details) {
+        if (!details) {
+          return "";
+        }
+        return Object.entries(details)
+          .filter(([, value]) => value !== undefined && value !== null && value !== "")
+          .map(([key, value]) => `${key}=${value}`)
+          .join(" | ");
+      }
 
-          function buildDetailString(details) {{
-            if (!details) {{
-              return "";
-            }}
-            const parts = Object.entries(details)
-              .filter(([, value]) => value !== undefined && value !== null && value !== "")
-              .map(([key, value]) => `${{key}}=${{value}}`);
-            return parts.join(" | ");
-          }}
+      function ensureLogPanelHost() {
+        const doc = getParentDocument();
+        let host = doc.getElementById(payload.logAnchorId);
+        if (!host) {
+          host = doc.createElement("div");
+          host.id = payload.logAnchorId;
+          doc.body.appendChild(host);
+        }
+        return host;
+      }
 
-          function ensureLogPanelHost() {{
-            const doc = getParentDocument();
-            let host = doc.getElementById(payload.logAnchorId);
-            if (!host) {{
-              host = doc.createElement("div");
-              host.id = payload.logAnchorId;
-              doc.body.appendChild(host);
-            }}
-            return host;
-          }}
+      function levelColors(level) {
+        return {
+          info: "#2563eb",
+          success: "#059669",
+          idle: "#64748b",
+          warning: "#d97706",
+          error: "#dc2626"
+        }[level] || "#334155";
+      }
 
-          function levelColors(level) {{
-            return {{
-              info: "#2563eb",
-              success: "#059669",
-              idle: "#64748b",
-              warning: "#d97706",
-              error: "#dc2626"
-            }}[level] || "#334155";
-          }}
-
-          function renderLogPanel() {{
-            const host = ensureLogPanelHost();
-            const entriesHtml = state.logEntries.length
-              ? state.logEntries.map((entry) => {{
-                  const detailString = buildDetailString(entry.details);
-                  return `
-                    <div style="padding:10px 12px;border-bottom:1px solid #e5e7eb;">
-                      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-                        <span style="font:600 12px/1.4 system-ui,sans-serif;color:${{levelColors(entry.level)}};text-transform:uppercase;">
-                          ${{entry.level}}
-                        </span>
-                        <span style="font:500 12px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;color:#64748b;">
-                          ${{formatMoment(entry.time)}}
-                        </span>
-                        <span style="font:600 13px/1.5 system-ui,sans-serif;color:#0f172a;">
-                          ${{entry.message}}
-                        </span>
-                      </div>
-                      ${{
-                        detailString
-                          ? `<div style="margin-top:6px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;color:#475569;word-break:break-word;">${{detailString}}</div>`
-                          : ""
-                      }}
-                    </div>
-                  `;
-                }}).join("")
-              : `<div style="padding:18px 12px;color:#64748b;font:13px/1.6 system-ui,sans-serif;">暂无日志，等待首轮数据更新。</div>`;
-
-            host.innerHTML = `
-              <section id="${{LOG_PANEL_ID}}" style="margin-top:20px;border:1px solid #e5e7eb;border-radius:16px;background:#ffffff;box-shadow:0 8px 24px rgba(15,23,42,0.06);overflow:hidden;">
-                <div style="padding:16px 18px 12px 18px;border-bottom:1px solid #e5e7eb;background:linear-gradient(180deg,#ffffff 0%,#f8fafc 100%);">
-                  <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
-                    <div>
-                      <div style="font:700 16px/1.4 system-ui,sans-serif;color:#0f172a;">运行日志</div>
-                      <div style="margin-top:4px;font:13px/1.5 system-ui,sans-serif;color:#64748b;">
-                        同端口接口 <span style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;">${{payload.apiPath}}</span>，
-                        每 5 分钟静默拉取一次增量数据。
-                      </div>
-                    </div>
-                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                      <span style="padding:6px 10px;border-radius:999px;background:#eff6ff;color:#1d4ed8;font:600 12px/1 system-ui,sans-serif;">状态: ${{state.lastResult}}</span>
-                      <span style="padding:6px 10px;border-radius:999px;background:#ecfdf5;color:#047857;font:600 12px/1 system-ui,sans-serif;">成功轮次: ${{state.successfulUpdates}}</span>
-                      <span style="padding:6px 10px;border-radius:999px;background:#f8fafc;color:#334155;font:600 12px/1 system-ui,sans-serif;">累计追加: ${{state.totalAppendedRecords}}</span>
-                    </div>
+      function renderLogPanel() {
+        const host = ensureLogPanelHost();
+        const entriesHtml = state.logEntries.length
+          ? state.logEntries.map((entry) => {
+              const detailString = buildDetailString(entry.details);
+              return `
+                <div style="padding:10px 12px;border-bottom:1px solid #e5e7eb;">
+                  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                    <span style="font:600 12px/1.4 system-ui,sans-serif;color:${levelColors(entry.level)};text-transform:uppercase;">${entry.level}</span>
+                    <span style="font:500 12px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;color:#64748b;">${formatMoment(entry.time)}</span>
+                    <span style="font:600 13px/1.5 system-ui,sans-serif;color:#0f172a;">${entry.message}</span>
                   </div>
-                  <div style="margin-top:10px;display:flex;gap:16px;flex-wrap:wrap;font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;color:#475569;">
-                    <span>最近尝试: ${{formatMoment(state.lastAttemptAt)}}</span>
-                    <span>最近成功: ${{formatMoment(state.lastSuccessAt)}}</span>
-                    <span>最近失败: ${{formatMoment(state.lastFailureAt)}}</span>
-                    <span>图表数: ${{payload.expectedChartCount}}</span>
+                  ${detailString ? `<div style="margin-top:6px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;color:#475569;word-break:break-word;">${detailString}</div>` : ""}
+                </div>
+              `;
+            }).join("")
+          : `<div style="padding:18px 12px;color:#64748b;font:13px/1.6 system-ui,sans-serif;">暂无日志，等待首轮数据更新。</div>`;
+
+        host.innerHTML = `
+          <section id="${LOG_PANEL_ID}" style="margin-top:20px;border:1px solid #e5e7eb;border-radius:16px;background:#ffffff;box-shadow:0 8px 24px rgba(15,23,42,0.06);overflow:hidden;">
+            <div style="padding:16px 18px 12px 18px;border-bottom:1px solid #e5e7eb;background:linear-gradient(180deg,#ffffff 0%,#f8fafc 100%);">
+              <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;">
+                <div>
+                  <div style="font:700 16px/1.4 system-ui,sans-serif;color:#0f172a;">运行日志</div>
+                  <div style="margin-top:4px;font:13px/1.5 system-ui,sans-serif;color:#64748b;">
+                    同端口接口 <span style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace;">${payload.apiPath}</span>，
+                    每 5 分钟静默拉取一次增量数据。
                   </div>
                 </div>
-                <div style="max-height:260px;overflow:auto;background:#fcfcfd;">
-                  ${{entriesHtml}}
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                  <span style="padding:6px 10px;border-radius:999px;background:#eff6ff;color:#1d4ed8;font:600 12px/1 system-ui,sans-serif;">状态: ${state.lastResult}</span>
+                  <span style="padding:6px 10px;border-radius:999px;background:#ecfdf5;color:#047857;font:600 12px/1 system-ui,sans-serif;">成功轮次: ${state.successfulUpdates}</span>
+                  <span style="padding:6px 10px;border-radius:999px;background:#f8fafc;color:#334155;font:600 12px/1 system-ui,sans-serif;">累计追加: ${state.totalAppendedRecords}</span>
                 </div>
-              </section>
-            `;
-          }}
+              </div>
+              <div style="margin-top:10px;display:flex;gap:16px;flex-wrap:wrap;font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;color:#475569;">
+                <span>最近尝试: ${formatMoment(state.lastAttemptAt)}</span>
+                <span>最近成功: ${formatMoment(state.lastSuccessAt)}</span>
+                <span>最近失败: ${formatMoment(state.lastFailureAt)}</span>
+                <span>图表数: ${payload.expectedChartCount}</span>
+              </div>
+            </div>
+            <div style="max-height:260px;overflow:auto;background:#fcfcfd;">${entriesHtml}</div>
+          </section>
+        `;
+      }
 
-          function appendLog(level, message, details) {{
-            const entry = {{
-              time: new Date().toISOString(),
-              level,
-              message,
-              details: details || {{}}
-            }};
-            state.logEntries = [entry, ...state.logEntries].slice(0, MAX_LOG_ENTRIES);
-            if (level === "error") {{
-              console.error(`[SmartMoney] ${{message}}`, details || {{}});
-            }} else {{
-              console.log(`[SmartMoney] ${{message}}`, details || {{}});
-            }}
-            renderLogPanel();
-          }}
+      function appendLog(level, message, details) {
+        const entry = {
+          time: new Date().toISOString(),
+          level,
+          message,
+          details: details || {}
+        };
+        state.logEntries = [entry, ...state.logEntries].slice(0, MAX_LOG_ENTRIES);
+        if (level === "error") {
+          console.error(`[SmartMoney] ${message}`, details || {});
+        } else {
+          console.log(`[SmartMoney] ${message}`, details || {});
+        }
+        renderLogPanel();
+      }
 
-          function seedInitialLogs() {{
-            if (bootstrapped) {{
-              return;
-            }}
-            payload.initialLogEntries.forEach((entry) => {{
-              state.logEntries.push(entry);
-            }});
-            state.logEntries = state.logEntries.slice(0, MAX_LOG_ENTRIES);
-            state.lastResult = payload.apiReady ? "待轮询" : "接口未就绪";
-            renderLogPanel();
-            appendLog(
-              payload.apiReady ? "success" : "error",
-              payload.apiReady
-                ? "同端口增量更新已接管后续刷新，不再进行整页 reload。"
-                : "同端口增量接口未就绪，当前无法启动静默更新。",
-              {{
-                latestTimestamp: payload.initialLatestTimestamp || "-",
-                pollIntervalMs: payload.pollIntervalMs
-              }}
-            );
-            bootstrapped = true;
-          }}
+      function seedInitialLogs() {
+        if (controller.bootstrapped) {
+          return;
+        }
+        payload.initialLogEntries.forEach((entry) => {
+          state.logEntries.push(entry);
+        });
+        state.logEntries = state.logEntries.slice(0, MAX_LOG_ENTRIES);
+        state.lastResult = payload.apiReady ? "待轮询" : "接口未就绪";
+        renderLogPanel();
+        appendLog(
+          payload.apiReady ? "success" : "error",
+          payload.apiReady
+            ? "同端口增量更新已接管后续刷新，不再进行整页 reload。"
+            : "同端口增量接口未就绪，当前无法启动静默更新。",
+          {
+            latestTimestamp: payload.initialLatestTimestamp || "-",
+            pollIntervalMs: payload.pollIntervalMs
+          }
+        );
+        controller.bootstrapped = true;
+      }
 
-          function shouldFollowLiveWindow(chart, previousLatestMs, defaultWindowMs) {{
-            const xaxis = chart && chart.layout ? chart.layout.xaxis : null;
-            const range = xaxis && Array.isArray(xaxis.range) ? xaxis.range : null;
-            if (!range || range.length < 2 || previousLatestMs === null) {{
-              return false;
-            }}
+      function shouldFollowLiveWindow(chart, previousLatestMs, defaultWindowMs) {
+        const xaxis = chart && chart.layout ? chart.layout.xaxis : null;
+        const range = xaxis && Array.isArray(xaxis.range) ? xaxis.range : null;
+        if (!range || range.length < 2 || previousLatestMs === null) {
+          return false;
+        }
 
-            const startMs = parseDateMs(range[0]);
-            const endMs = parseDateMs(range[1]);
-            if (startMs === null || endMs === null) {{
-              return false;
-            }}
+        const startMs = parseDateMs(range[0]);
+        const endMs = parseDateMs(range[1]);
+        if (startMs === null || endMs === null) {
+          return false;
+        }
 
-            const nearLiveEdge = Math.abs(endMs - previousLatestMs) <= 60 * 1000;
-            const keepsDefaultWindow = Math.abs((endMs - startMs) - defaultWindowMs) <= 5 * 60 * 1000;
-            return nearLiveEdge && keepsDefaultWindow;
-          }}
+        const nearLiveEdge = Math.abs(endMs - previousLatestMs) <= 60 * 1000;
+        const keepsDefaultWindow = Math.abs((endMs - startMs) - defaultWindowMs) <= 5 * 60 * 1000;
+        return nearLiveEdge && keepsDefaultWindow;
+      }
 
-          function buildBarColors(records, config) {{
-            if (!config.ref_col) {{
-              return null;
-            }}
+      function buildBarColors(records, config) {
+        if (!config.ref_col) {
+          return null;
+        }
 
-            return records.map((record) => {{
-              const refValue = Number(record[config.ref_col]);
-              if (!Number.isFinite(refValue)) {{
-                return config.base_color;
-              }}
-              if (refValue < 0.1) {{
-                return "#ef4444";
-              }}
-              if (refValue > 0.9) {{
-                return "#f59e0b";
-              }}
-              return config.base_color;
-            }});
-          }}
+        return records.map((record) => {
+          const refValue = Number(record[config.ref_col]);
+          if (!Number.isFinite(refValue)) {
+            return config.base_color;
+          }
+          if (refValue < 0.1) {
+            return "#ef4444";
+          }
+          if (refValue > 0.9) {
+            return "#f59e0b";
+          }
+          return config.base_color;
+        });
+      }
 
-          async function fetchIncrementalPayload(sinceTimestamp) {{
-            const url = new URL(payload.apiPath, window.parent.location.origin);
-            url.searchParams.set("since", sinceTimestamp);
-            const response = await fetch(url.toString(), {{
-              method: "GET",
-              cache: "no-store",
-              credentials: "same-origin"
-            }});
+      async function fetchIncrementalPayload(sinceTimestamp) {
+        const url = new URL(payload.apiPath, parentWindow.location.origin);
+        url.searchParams.set("since", sinceTimestamp);
+        const response = await fetch(url.toString(), {
+          method: "GET",
+          cache: "no-store",
+          credentials: "same-origin"
+        });
 
-            const data = await response.json().catch(() => ({{}}));
-            if (!response.ok) {{
-              throw new Error(data.error || `HTTP ${{response.status}}`);
-            }}
-            return data;
-          }}
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.error || `HTTP ${response.status}`);
+        }
+        return data;
+      }
 
-          async function appendRecordsToChart(chart, records, plotly) {{
-            const config = chart.layout.meta.smart_money_config;
-            const metricTrace = chart.data[0];
-            const priceTrace = chart.data[1];
+      async function appendRecordsToChart(chart, records, plotly) {
+        const config = chart.layout.meta.smart_money_config;
+        const metricTrace = chart.data[0];
+        const priceTrace = chart.data[1];
 
-            if (!metricTrace || !priceTrace) {{
-              return;
-            }}
+        if (!metricTrace || !priceTrace || !records.length) {
+          return;
+        }
 
-            const chartState = ensureChartState(chart);
-            const existingMetricX = chartState.metricX;
-            const existingMetricY = chartState.metricY;
-            const existingPriceX = chartState.priceX;
-            const existingPriceY = chartState.priceY;
+        const currentMetricX = toTraceArray(metricTrace.x);
+        const previousLatestX = currentMetricX.length ? currentMetricX[currentMetricX.length - 1] : null;
+        const previousLatestMs = parseDateMs(previousLatestX);
+        const followLiveWindow = shouldFollowLiveWindow(chart, previousLatestMs, config.default_window_ms);
 
-            const previousLatestMs = existingMetricX.length ? parseDateMs(existingMetricX[existingMetricX.length - 1]) : null;
-            const followLiveWindow = shouldFollowLiveWindow(chart, previousLatestMs, config.default_window_ms);
+        const newX = records.map((record) => record.timestamp);
+        const newMetricY = records.map((record) => toNumber(record[config.metric_col]));
+        const newPriceY = records.map((record) => toNumber(record.current_price));
 
-            const xSample = existingMetricX.length
-              ? existingMetricX[existingMetricX.length - 1]
-              : (existingPriceX.length ? existingPriceX[existingPriceX.length - 1] : null);
-            const newX = records.map((record) => coerceXValueLike(xSample, record.timestamp));
-            const newMetricY = records.map((record) => toNumber(record[config.metric_col]));
-            const newPriceY = records.map((record) => toNumber(record.current_price));
-            const nextMetricX = existingMetricX.concat(newX);
-            const nextMetricY = existingMetricY.concat(newMetricY);
-            const nextPriceX = existingPriceX.concat(newX);
-            const nextPriceY = existingPriceY.concat(newPriceY);
+        if (!newX.length) {
+          return;
+        }
 
-            chartState.metricX = nextMetricX;
-            chartState.metricY = nextMetricY;
-            chartState.priceX = nextPriceX;
-            chartState.priceY = nextPriceY;
+        await plotly.extendTraces(
+          chart,
+          {
+            x: [newX, newX],
+            y: [newMetricY, newPriceY]
+          },
+          [0, 1]
+        );
 
-            await plotly.restyle(
-              chart,
-              {{
-                x: [nextMetricX, nextPriceX],
-                y: [nextMetricY, nextPriceY]
-              }},
-              [0, 1]
-            );
+        if (metricTrace.type === "bar") {
+          const appendedColors = buildBarColors(records, config);
+          if (appendedColors && appendedColors.length) {
+            try {
+              await plotly.extendTraces(
+                chart,
+                {
+                  "marker.color": [appendedColors]
+                },
+                [0]
+              );
+            } catch (error) {
+              console.warn("[SmartMoney] marker color append skipped:", error);
+            }
+          }
+        }
 
-            if (metricTrace.type === "bar") {{
-              const appendedColors = buildBarColors(records, config);
-              if (appendedColors) {{
-                const metricColorSource = metricTrace.marker ? metricTrace.marker.color : null;
-                const currentColors = chartState.metricColors.length
-                  ? chartState.metricColors
-                  : toTraceArray(metricColorSource);
-                const colorSeed = currentColors.length
-                  ? currentColors
-                  : (
-                      typeof metricColorSource === "string"
-                        ? Array(nextMetricX.length - appendedColors.length).fill(metricColorSource)
-                        : Array(nextMetricX.length - appendedColors.length).fill(config.base_color)
-                    );
-                if (colorSeed.length) {{
-                  const nextColors = colorSeed.concat(appendedColors);
-                  chartState.metricColors = nextColors;
-                  await plotly.restyle(
-                    chart,
-                    {{
-                      "marker.color": [nextColors]
-                    }},
-                    [0]
-                  );
-                }}
-              }}
-            }}
+        const relayoutPayload = {};
+        const xaxis = chart.layout ? chart.layout.xaxis : null;
+        const sliderRange = xaxis && xaxis.rangeslider && Array.isArray(xaxis.rangeslider.range)
+          ? xaxis.rangeslider.range
+          : null;
+        const latestPoint = newX[newX.length - 1];
 
-            const relayoutPayload = {{}};
-            const xaxis = chart.layout ? chart.layout.xaxis : null;
-            const sliderRange = xaxis && xaxis.rangeslider && Array.isArray(xaxis.rangeslider.range)
-              ? xaxis.rangeslider.range
-              : null;
-            const sliderStart = sliderRange && sliderRange[0] ? sliderRange[0] : existingMetricX[0];
-            const latestPoint = newX[newX.length - 1];
-            relayoutPayload["xaxis.rangeslider.range"] = [sliderStart, latestPoint];
+        relayoutPayload["xaxis.rangeslider.range[0]"] =
+          sliderRange && sliderRange[0] ? sliderRange[0] : (currentMetricX[0] || newX[0]);
+        relayoutPayload["xaxis.rangeslider.range[1]"] = latestPoint;
 
-            if (followLiveWindow) {{
-              const latestMs = parseDateMs(latestPoint);
-              if (latestMs !== null) {{
-                relayoutPayload["xaxis.range"] = [
-                  new Date(latestMs - config.default_window_ms),
-                  new Date(latestMs)
-                ];
-              }}
-            }}
+        if (followLiveWindow) {
+          const latestMs = parseDateMs(latestPoint);
+          if (latestMs !== null) {
+            relayoutPayload["xaxis.range[0]"] = new Date(latestMs - config.default_window_ms);
+            relayoutPayload["xaxis.range[1]"] = new Date(latestMs);
+          }
+        }
 
-            await plotly.relayout(chart, relayoutPayload);
-          }}
+        await plotly.relayout(chart, relayoutPayload);
+      }
 
-          async function runIncrementalRefresh() {{
-            if (isUpdating || !lastTimestamp || !payload.apiReady) {{
-              return;
-            }}
+      async function runIncrementalRefresh() {
+        if (controller.isUpdating || !controller.lastTimestamp || !payload.apiReady) {
+          return;
+        }
 
-            const plotly = getPlotly();
-            const charts = getSmartMoneyCharts();
-            if (!plotly || charts.length < payload.expectedChartCount) {{
-              return;
-            }}
+        const plotly = getPlotly();
+        const charts = getSmartMoneyCharts();
+        if (!plotly || charts.length < payload.expectedChartCount) {
+          return;
+        }
 
-            state.lastAttemptAt = new Date().toISOString();
-            state.lastResult = "轮询中";
-            renderLogPanel();
-            appendLog("info", "开始轮询同端口增量接口。", {{
-              since: lastTimestamp,
-              charts: charts.length
-            }});
+        state.lastAttemptAt = new Date().toISOString();
+        state.lastResult = "轮询中";
+        renderLogPanel();
 
-            isUpdating = true;
-            try {{
-              const responseData = await fetchIncrementalPayload(lastTimestamp);
-              const records = Array.isArray(responseData.append_data) ? responseData.append_data : [];
+        controller.isUpdating = true;
+        try {
+          const responseData = await fetchIncrementalPayload(controller.lastTimestamp);
+          const records = Array.isArray(responseData.append_data) ? responseData.append_data : [];
 
-              if (!records.length) {{
-                state.lastResult = "无新数据";
-                hideStatus();
-                appendLog("idle", "本轮无新数据，页面保持不动。", {{
-                  since: lastTimestamp,
-                  latestTimestamp: responseData.latest_timestamp || lastTimestamp
-                }});
-                return;
-              }}
-
-              for (const chart of charts) {{
-                await appendRecordsToChart(chart, records, plotly);
-              }}
-
-              lastTimestamp = responseData.latest_timestamp || records[records.length - 1].timestamp;
-              state.successfulUpdates += 1;
-              state.totalAppendedRecords += records.length;
-              state.lastSuccessAt = new Date().toISOString();
-              state.lastResult = `已追加 ${{records.length}} 条`;
-              hideStatus();
-              appendLog("success", "增量数据已静默追加到图表。", {{
-                appendedRows: records.length,
-                chartsUpdated: charts.length,
-                latestTimestamp: lastTimestamp
-              }});
-            }} catch (error) {{
-              state.lastFailureAt = new Date().toISOString();
-              state.lastResult = "更新失败";
-              console.error("Smart Money incremental update failed:", error);
-              showStatus("数据更新失败，稍后重试");
-              appendLog("error", "增量更新失败，将在下一轮自动重试。", {{
-                error: error && error.message ? error.message : String(error),
-                since: lastTimestamp
-              }});
-            }} finally {{
-              isUpdating = false;
-              renderLogPanel();
-            }}
-          }}
-
-          function bootstrap() {{
-            seedInitialLogs();
-
-            if (!payload.apiReady) {{
-              showStatus("同端口接口未就绪");
-              return;
-            }}
-
-            if (!payload.initialLatestTimestamp || payload.expectedChartCount < 1) {{
-              appendLog("warning", "缺少图表或最新时间戳，未启动自动轮询。", {{
-                latestTimestamp: payload.initialLatestTimestamp || "-",
-                charts: payload.expectedChartCount
-              }});
-              return;
-            }}
-
-            const plotly = getPlotly();
-            const charts = getSmartMoneyCharts();
-            if (!plotly || charts.length < payload.expectedChartCount) {{
-              window.setTimeout(bootstrap, 1000);
-              return;
-            }}
-
-            ensureStatusNode();
+          if (!records.length) {
+            state.lastResult = "无新数据";
             hideStatus();
-            if (timerId) {{
-              window.clearInterval(timerId);
-            }}
-            timerId = window.setInterval(runIncrementalRefresh, payload.pollIntervalMs);
-            appendLog("info", "日志栏与静默增量更新已启动。", {{
-              pollIntervalMs: payload.pollIntervalMs,
-              charts: payload.expectedChartCount,
-              api: payload.apiPath
-            }});
-          }}
+            appendLog("idle", "本轮无新数据，页面保持不动。", {
+              since: controller.lastTimestamp,
+              latestTimestamp: responseData.latest_timestamp || controller.lastTimestamp
+            });
+            return;
+          }
 
-          bootstrap();
-        }})();
-        </script>
-        """,
-        height=0,
-        width=0,
-    )
+          for (const chart of charts) {
+            await appendRecordsToChart(chart, records, plotly);
+          }
+
+          controller.lastTimestamp =
+            responseData.latest_timestamp ||
+            records[records.length - 1].source_timestamp ||
+            controller.lastTimestamp;
+          state.successfulUpdates += 1;
+          state.totalAppendedRecords += records.length;
+          state.lastSuccessAt = new Date().toISOString();
+          state.lastResult = `已追加 ${records.length} 条`;
+          hideStatus();
+          appendLog("success", "增量数据已用 Plotly.extendTraces 追加到图表。", {
+            appendedRows: records.length,
+            chartsUpdated: charts.length,
+            latestTimestamp: controller.lastTimestamp
+          });
+        } catch (error) {
+          state.lastFailureAt = new Date().toISOString();
+          state.lastResult = "更新失败";
+          console.error("Smart Money incremental update failed:", error);
+          showStatus("数据更新失败，稍后重试");
+          appendLog("error", "增量更新失败，将在下一轮自动重试。", {
+            error: error && error.message ? error.message : String(error),
+            since: controller.lastTimestamp
+          });
+        } finally {
+          controller.isUpdating = false;
+          renderLogPanel();
+        }
+      }
+
+      function bootstrap() {
+        seedInitialLogs();
+
+        if (!payload.apiReady) {
+          showStatus("同端口接口未就绪");
+          return;
+        }
+
+        if (!payload.initialLatestTimestamp || payload.expectedChartCount < 1) {
+          appendLog("warning", "缺少图表或最新时间戳，未启动自动轮询。", {
+            latestTimestamp: payload.initialLatestTimestamp || "-",
+            charts: payload.expectedChartCount
+          });
+          return;
+        }
+
+        const plotly = getPlotly();
+        const charts = getSmartMoneyCharts();
+        if (!plotly || charts.length < payload.expectedChartCount) {
+          parentWindow.setTimeout(bootstrap, 1000);
+          return;
+        }
+
+        ensureStatusNode();
+        hideStatus();
+        controller.timerId = parentWindow.setInterval(runIncrementalRefresh, payload.pollIntervalMs);
+        appendLog("info", "日志栏与静默增量更新已启动。", {
+          pollIntervalMs: payload.pollIntervalMs,
+          charts: payload.expectedChartCount,
+          api: payload.apiPath
+        });
+      }
+
+      bootstrap();
+    })();
+    </script>
+    """.replace("__SMART_MONEY_PAYLOAD__", json.dumps(payload, ensure_ascii=False))
+
+    components.html(script, height=1, width=1)
 
 
 st.set_page_config(
