@@ -13,6 +13,7 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
+from market_structure32 import add_structure32_columns, build_structure32_figure
 from plotly.subplots import make_subplots
 
 
@@ -759,3 +760,17 @@ else:
 
         if rendered_chart_count:
             render_linked_time_axis_script(rendered_chart_count)
+
+        structure32_df = add_structure32_columns(df, {})
+        st.subheader("32种盘口结构提示图")
+        st.caption(
+            "按首次出现的 价格涨跌 + 多空均价涨跌 + 多空仓位升降 组合标记。"
+            "强度 1-5 表示结构强弱，不代表确定性结果。"
+        )
+        st.plotly_chart(
+            build_structure32_figure(structure32_df),
+            width="stretch",
+            key="smart_money_structure32_chart",
+        )
+        latest_structure_reason = structure32_df.iloc[-1].get("structure32_reason", "当前没有完整触发32结构。")
+        st.info(str(latest_structure_reason))
