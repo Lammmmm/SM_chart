@@ -6,3 +6,4 @@ dist/
 config.json
 build/
 .DS_Store
+smart_money_cache.json

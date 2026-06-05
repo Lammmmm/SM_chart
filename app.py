@@ -12,6 +12,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 from plotly.subplots import make_subplots
 
 
@@ -446,6 +447,10 @@ def build_chart_figure(
             font=dict(color="#333333", size=13),
         ),
         uirevision=f"smart_money_chart_{chart_index}",
+        meta={
+            "smart_money_sync_group": "long" if chart_index < 3 else "short",
+            "smart_money_chart_index": chart_index,
+        },
     )
 
     figure.update_xaxes(
@@ -481,6 +486,142 @@ def build_chart_figure(
     )
 
     return figure
+
+
+def render_linked_time_axis_script(expected_chart_count: int) -> None:
+    payload = {
+        "expectedChartCount": expected_chart_count,
+        "groupMetaKey": "smart_money_sync_group",
+    }
+
+    components.html(
+        f"""
+        <script>
+        (function() {{
+          const payload = {json.dumps(payload, ensure_ascii=False)};
+
+          function getParentDocument() {{
+            return window.parent && window.parent.document ? window.parent.document : document;
+          }}
+
+          function getPlotly() {{
+            return window.parent && window.parent.Plotly ? window.parent.Plotly : window.Plotly;
+          }}
+
+          function getSmartMoneyCharts() {{
+            const doc = getParentDocument();
+            return Array.from(
+              doc.querySelectorAll('[data-testid="stPlotlyChart"] .js-plotly-plot')
+            ).filter((chart) => {{
+              return chart
+                && chart.layout
+                && chart.layout.meta
+                && chart.layout.meta[payload.groupMetaKey];
+            }});
+          }}
+
+          function buildRelayoutUpdate(sourceChart, eventData) {{
+            const xaxis = sourceChart && sourceChart.layout ? sourceChart.layout.xaxis : null;
+            if (!xaxis) {{
+              return null;
+            }}
+
+            const update = {{}};
+            const hasAutorange = eventData && Object.prototype.hasOwnProperty.call(eventData, "xaxis.autorange");
+            const hasRange = eventData && (
+              Object.prototype.hasOwnProperty.call(eventData, "xaxis.range") ||
+              Object.prototype.hasOwnProperty.call(eventData, "xaxis.range[0]") ||
+              Object.prototype.hasOwnProperty.call(eventData, "xaxis.range[1]")
+            );
+
+            if (hasAutorange) {{
+              update["xaxis.autorange"] = eventData["xaxis.autorange"];
+            }}
+
+            if (!hasAutorange && !hasRange) {{
+              return null;
+            }}
+
+            if (hasRange) {{
+              const range = Array.isArray(xaxis.range) ? xaxis.range.slice() : null;
+              if (range && range.length >= 2) {{
+                update["xaxis.range"] = range;
+                update["xaxis.autorange"] = false;
+              }}
+            }}
+
+            const sliderRange = xaxis.rangeslider && Array.isArray(xaxis.rangeslider.range)
+              ? xaxis.rangeslider.range.slice()
+              : null;
+            if (sliderRange && sliderRange.length >= 2) {{
+              update["xaxis.rangeslider.range"] = sliderRange;
+            }}
+
+            return Object.keys(update).length ? update : null;
+          }}
+
+          function syncChartsInGroup(sourceChart, eventData) {{
+            if (sourceChart.__smartMoneySyncing) {{
+              return;
+            }}
+
+            const plotly = getPlotly();
+            if (!plotly) {{
+              return;
+            }}
+
+            const sourceGroup = sourceChart.layout.meta[payload.groupMetaKey];
+            const update = buildRelayoutUpdate(sourceChart, eventData || {{}});
+            if (!sourceGroup || !update) {{
+              return;
+            }}
+
+            const siblingCharts = getSmartMoneyCharts().filter((chart) => {{
+              return chart !== sourceChart && chart.layout.meta[payload.groupMetaKey] === sourceGroup;
+            }});
+
+            siblingCharts.forEach((chart) => {{
+              chart.__smartMoneySyncing = true;
+              Promise.resolve(plotly.relayout(chart, update))
+                .catch((error) => console.error("Smart Money axis sync failed:", error))
+                .finally(() => {{
+                  chart.__smartMoneySyncing = false;
+                }});
+            }});
+          }}
+
+          function bindChart(chart) {{
+            if (chart.__smartMoneySyncBound) {{
+              return;
+            }}
+
+            chart.__smartMoneySyncBound = true;
+            chart.on("plotly_relayout", (eventData) => {{
+              if (chart.__smartMoneySyncing) {{
+                return;
+              }}
+              syncChartsInGroup(chart, eventData);
+            }});
+          }}
+
+          function bootstrap() {{
+            const plotly = getPlotly();
+            const charts = getSmartMoneyCharts();
+            if (!plotly || charts.length < payload.expectedChartCount) {{
+              window.setTimeout(bootstrap, 1000);
+              return;
+            }}
+
+            charts.forEach(bindChart);
+          }}
+
+          bootstrap();
+        }})();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
 
 
 st.set_page_config(
@@ -604,6 +745,7 @@ else:
     else:
         x_min = df["timestamp"].min()
         x_max = df["timestamp"].max()
+        rendered_chart_count = 0
 
         st.caption(
             f"当前图表展示全量本地数据：{x_min:%Y-%m-%d %H:%M:%S} 至 {x_max:%Y-%m-%d %H:%M:%S}。"
@@ -649,3 +791,7 @@ else:
                     width="stretch",
                     key=f"smart_money_chart_{index}",
                 )
+                rendered_chart_count += 1
+
+        if rendered_chart_count:
+            render_linked_time_axis_script(rendered_chart_count)
