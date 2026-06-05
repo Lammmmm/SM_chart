@@ -40,7 +40,7 @@ NUMERIC_COLUMNS = [
 ]
 
 ALL_METRICS = [
-    {"col": "ls_ratio", "name": "多空人数比", "color": "#14b8a6"},
+    {"col": "ls_ratio", "name": "多空人数比", "color": "#64748b"},
     {"col": "long_pos_usdt", "name": "多头持仓总额", "color": "#f43f5e"},
     {"col": "short_pos_usdt", "name": "空头持仓总额", "color": "#10b981"},
     {"col": "long_unrealized_pnl", "name": "多头未实现盈亏", "color": "#3b82f6"},
@@ -91,14 +91,6 @@ def emit_server_log(message: str, **details: Any) -> None:
 
 def escape_filter_value(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def get_reference_metric(metric_col: str) -> str | None:
-    if metric_col.startswith("long_"):
-        return "long_pnl_ratio"
-    if metric_col.startswith("short_"):
-        return "short_pnl_ratio"
-    return None
 
 
 def fetch_smart_money_records(since: str | None = None) -> list[dict[str, Any]]:
@@ -358,30 +350,6 @@ def prepare_dataframe(records: list[dict[str, Any]]) -> pd.DataFrame:
     return df.sort_values("timestamp").reset_index(drop=True)
 
 
-def resolve_metric_style(
-    df: pd.DataFrame,
-    metric_col: str,
-    metric_color: str,
-) -> tuple[str, str | None, str | list[str]]:
-    base_color = "#10b981" if metric_col in {"long_pnl_ratio", "short_pnl_ratio"} else metric_color
-    ref_col = get_reference_metric(metric_col)
-
-    if not ref_col or ref_col not in df.columns:
-        return base_color, None, base_color
-
-    colors: list[str] = []
-    for value in df[ref_col]:
-        if pd.isna(value):
-            colors.append(base_color)
-        elif value < 0.1:
-            colors.append("#ef4444")
-        elif value > 0.9:
-            colors.append("#f59e0b")
-        else:
-            colors.append(base_color)
-    return base_color, ref_col, colors
-
-
 def build_chart_figure(
     df: pd.DataFrame,
     metric: dict[str, Any],
@@ -393,7 +361,6 @@ def build_chart_figure(
     metric_name = metric["name"]
     metric_color = metric["color"]
 
-    base_color, _ref_col, bar_color = resolve_metric_style(df, metric_col, metric_color)
     is_price_metric = metric_col.endswith("_avg_price")
     figure = make_subplots(specs=[[{"secondary_y": True}]])
 
@@ -404,7 +371,7 @@ def build_chart_figure(
                 y=df[metric_col],
                 name=metric_name,
                 mode="lines",
-                line=dict(color=base_color, width=2),
+                line=dict(color=metric_color, width=2),
                 hovertemplate="%{y:,.4f}<extra></extra>",
             ),
             secondary_y=False,
@@ -415,7 +382,7 @@ def build_chart_figure(
                 x=df["timestamp"],
                 y=df[metric_col],
                 name=metric_name,
-                marker_color=bar_color,
+                marker_color=metric_color,
                 opacity=0.75,
                 width=1000 * 60 * 4,
                 hovertemplate="%{y:,.4f}<extra></extra>",
@@ -475,7 +442,7 @@ def build_chart_figure(
         gridcolor="#f3f4f6",
         zeroline=True,
         zerolinecolor="#e5e7eb",
-        color=base_color,
+        color=metric_color,
         secondary_y=False,
         showticklabels=True,
     )
