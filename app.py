@@ -12,6 +12,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 from market_structure32 import add_structure32_columns, render_structure32_section
 from plotly.subplots import make_subplots
 from structure32_case_explorer import render_structure32_case_explorer
@@ -67,6 +68,14 @@ DEFAULT_METRIC_COLUMNS = [
     "short_pos_usdt",
     "short_avg_price",
 ]
+
+CHART_PERIOD_OPTIONS = {
+    "24H": pd.Timedelta(hours=24),
+    "1W": pd.Timedelta(weeks=1),
+    "1M": pd.Timedelta(days=30),
+}
+CHART_TOP_EMPTY_RATIO = 0.2
+CHART_LINE_BOTTOM_PADDING_RATIO = 0.05
 
 
 def load_pocketbase_url() -> str:
@@ -341,6 +350,8 @@ def build_chart_figure(
     chart_index: int,
     x_min: pd.Timestamp,
     x_max: pd.Timestamp,
+    period_label: str,
+    show_rangeslider: bool,
 ) -> go.Figure:
     metric_col = metric["col"]
     metric_name = metric["name"]
@@ -399,29 +410,53 @@ def build_chart_figure(
             bordercolor="#e5e7eb",
             font=dict(color="#333333", size=13),
         ),
-        uirevision=f"smart_money_chart_{chart_index}",
+        uirevision=f"smart_money_chart_{chart_index}_{period_label}",
         meta={
             "smart_money_sync_group": "long" if chart_index < 4 else "short",
             "smart_money_chart_index": chart_index,
         },
     )
 
-    figure.update_xaxes(
+    xaxis_config: dict[str, Any] = dict(
         showgrid=False,
         zeroline=False,
         range=[x_min, x_max],
-        rangeslider_visible=True,
-        rangeslider=dict(thickness=0.08, bgcolor="#f8f9fa", range=[x_min, x_max]),
         tickformat="%m-%d %H:%M",
         hoverformat="%Y-%m-%d %H:%M:%S",
         color="#6b7280",
     )
+    if show_rangeslider:
+        xaxis_config["rangeslider_visible"] = True
+        xaxis_config["rangeslider"] = dict(thickness=0.08, bgcolor="#f8f9fa", range=[x_min, x_max])
+    else:
+        xaxis_config["rangeslider_visible"] = False
+
+    figure.update_xaxes(
+        **xaxis_config,
+    )
+
+    primary_series = df[metric_col]
+    if is_price_metric:
+        primary_series = pd.concat([df[metric_col], df["current_price"]], ignore_index=True)
+    primary_y_range = compute_axis_range(
+        primary_series,
+        bottom_padding_ratio=CHART_LINE_BOTTOM_PADDING_RATIO if is_price_metric else 0.0,
+        anchor_zero=not is_price_metric,
+    )
+    secondary_y_range = None
+    if not is_price_metric:
+        secondary_y_range = compute_axis_range(
+            df["current_price"],
+            bottom_padding_ratio=CHART_LINE_BOTTOM_PADDING_RATIO,
+        )
+
     figure.update_yaxes(
         showgrid=True,
         gridcolor="#f3f4f6",
         zeroline=True,
         zerolinecolor="#e5e7eb",
         color=metric_color,
+        range=primary_y_range,
         secondary_y=False,
         showticklabels=True,
     )
@@ -429,10 +464,239 @@ def build_chart_figure(
         showgrid=False,
         zeroline=False,
         color="#900C3F",
+        range=secondary_y_range,
         secondary_y=True,
         showticklabels=not is_price_metric,
     )
     return figure
+
+
+def compute_axis_range(
+    series: pd.Series,
+    *,
+    top_empty_ratio: float = CHART_TOP_EMPTY_RATIO,
+    bottom_padding_ratio: float = 0.0,
+    anchor_zero: bool = False,
+) -> list[float] | None:
+    values = pd.to_numeric(series, errors="coerce").dropna()
+    if values.empty:
+        return None
+
+    data_min = float(values.min())
+    data_max = float(values.max())
+    lower_bound = data_min
+    upper_bound = data_max
+
+    if anchor_zero:
+        if data_min >= 0:
+            lower_bound = 0.0
+        if data_max <= 0:
+            upper_bound = 0.0
+
+    span = upper_bound - lower_bound
+    if span <= 0:
+        base = abs(upper_bound) if upper_bound else 1.0
+        min_padding = base * max(bottom_padding_ratio, 0.05)
+        max_padding = base * max(top_empty_ratio, 0.25)
+        range_min = lower_bound - min_padding
+        range_max = upper_bound + max_padding
+        if anchor_zero:
+            if data_min >= 0:
+                range_min = 0.0
+            if data_max <= 0:
+                range_max = 0.0
+        if range_min == range_max:
+            range_max = range_min + 1.0
+        return [range_min, range_max]
+
+    usable_ratio = 1.0 - top_empty_ratio - bottom_padding_ratio
+    if usable_ratio <= 0:
+        usable_ratio = 0.5
+
+    total_range = span / usable_ratio
+    top_padding = total_range * top_empty_ratio
+    bottom_padding = total_range * bottom_padding_ratio
+    range_min = lower_bound - bottom_padding
+    range_max = upper_bound + top_padding
+
+    if anchor_zero:
+        if data_min >= 0:
+            range_min = 0.0
+        if data_max <= 0:
+            range_max = 0.0
+
+    if range_min == range_max:
+        range_max = range_min + 1.0
+    return [range_min, range_max]
+
+
+def resolve_chart_time_range(df: pd.DataFrame, period_label: str) -> tuple[pd.Timestamp, pd.Timestamp]:
+    data_min = df["timestamp"].min()
+    data_max = df["timestamp"].max()
+    selected_window = CHART_PERIOD_OPTIONS.get(period_label, CHART_PERIOD_OPTIONS["1W"])
+    return max(data_min, data_max - selected_window), data_max
+
+
+def filter_chart_dataframe(df: pd.DataFrame, x_min: pd.Timestamp, x_max: pd.Timestamp) -> pd.DataFrame:
+    chart_df = df[(df["timestamp"] >= x_min) & (df["timestamp"] <= x_max)].copy()
+    if chart_df.empty:
+        return df.copy()
+    return chart_df.reset_index(drop=True)
+
+
+def render_linked_time_axis_script(expected_chart_count: int) -> None:
+    payload = {
+        "expectedChartCount": expected_chart_count,
+        "groupMetaKey": "smart_money_sync_group",
+    }
+
+    components.html(
+        f"""
+        <script>
+        (function() {{
+          const payload = {json.dumps(payload, ensure_ascii=False)};
+
+          function getParentDocument() {{
+            return window.parent && window.parent.document ? window.parent.document : document;
+          }}
+
+          function getPlotly() {{
+            return window.parent && window.parent.Plotly ? window.parent.Plotly : window.Plotly;
+          }}
+
+          function getSmartMoneyCharts() {{
+            const doc = getParentDocument();
+            return Array.from(
+              doc.querySelectorAll('[data-testid="stPlotlyChart"] .js-plotly-plot')
+            ).filter((chart) => {{
+              return chart
+                && chart.layout
+                && chart.layout.meta
+                && chart.layout.meta[payload.groupMetaKey];
+            }});
+          }}
+
+          function buildRelayoutUpdate(sourceChart, eventData) {{
+            const xaxis = sourceChart && sourceChart.layout ? sourceChart.layout.xaxis : null;
+            if (!xaxis) {{
+              return null;
+            }}
+
+            const update = {{}};
+            const hasAutorange = eventData && Object.prototype.hasOwnProperty.call(eventData, "xaxis.autorange");
+            const hasRange = eventData && (
+              Object.prototype.hasOwnProperty.call(eventData, "xaxis.range") ||
+              Object.prototype.hasOwnProperty.call(eventData, "xaxis.range[0]") ||
+              Object.prototype.hasOwnProperty.call(eventData, "xaxis.range[1]")
+            );
+
+            if (hasAutorange) {{
+              update["xaxis.autorange"] = eventData["xaxis.autorange"];
+            }}
+
+            if (!hasAutorange && !hasRange) {{
+              return null;
+            }}
+
+            if (hasRange) {{
+              const range = Array.isArray(xaxis.range) ? xaxis.range.slice() : null;
+              if (range && range.length >= 2) {{
+                update["xaxis.range"] = range;
+                update["xaxis.autorange"] = false;
+              }}
+            }}
+
+            return Object.keys(update).length ? update : null;
+          }}
+
+          function rangesMatch(chart, update) {{
+            if (!update || !Array.isArray(update["xaxis.range"])) {{
+              return false;
+            }}
+
+            const chartRange = chart && chart.layout && chart.layout.xaxis && Array.isArray(chart.layout.xaxis.range)
+              ? chart.layout.xaxis.range
+              : null;
+            if (!chartRange || chartRange.length < 2) {{
+              return false;
+            }}
+
+            return String(chartRange[0]) === String(update["xaxis.range"][0])
+              && String(chartRange[1]) === String(update["xaxis.range"][1]);
+          }}
+
+          function syncChartsInGroup(sourceChart, eventData) {{
+            if (sourceChart.__smartMoneySyncing) {{
+              return;
+            }}
+
+            const plotly = getPlotly();
+            if (!plotly) {{
+              return;
+            }}
+
+            const sourceGroup = sourceChart.layout.meta[payload.groupMetaKey];
+            const update = buildRelayoutUpdate(sourceChart, eventData || {{}});
+            if (!sourceGroup || !update) {{
+              return;
+            }}
+
+            const siblingCharts = getSmartMoneyCharts().filter((chart) => {{
+              return chart !== sourceChart && chart.layout.meta[payload.groupMetaKey] === sourceGroup;
+            }});
+
+            siblingCharts.forEach((chart) => {{
+              if (rangesMatch(chart, update)) {{
+                return;
+              }}
+              chart.__smartMoneySyncing = true;
+              Promise.resolve(plotly.relayout(chart, update))
+                .catch((error) => console.error("Smart Money axis sync failed:", error))
+                .finally(() => {{
+                  chart.__smartMoneySyncing = false;
+                }});
+            }});
+          }}
+
+          function bindChart(chart) {{
+            if (chart.__smartMoneySyncBound) {{
+              return;
+            }}
+
+            chart.__smartMoneySyncBound = true;
+            chart.on("plotly_relayout", (eventData) => {{
+              if (chart.__smartMoneySyncing) {{
+                return;
+              }}
+              chart.__smartMoneyPendingRelayout = eventData;
+              if (chart.__smartMoneySyncTimer) {{
+                window.clearTimeout(chart.__smartMoneySyncTimer);
+              }}
+              chart.__smartMoneySyncTimer = window.setTimeout(() => {{
+                chart.__smartMoneySyncTimer = null;
+                syncChartsInGroup(chart, chart.__smartMoneyPendingRelayout || {{}});
+              }}, 80);
+            }});
+          }}
+
+          function bootstrap() {{
+            const plotly = getPlotly();
+            const charts = getSmartMoneyCharts();
+            if (!plotly || charts.length < payload.expectedChartCount) {{
+              window.setTimeout(bootstrap, 1000);
+              return;
+            }}
+
+            charts.forEach(bindChart);
+          }}
+
+          bootstrap();
+        }})();
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
 
 
 def render_dashboard() -> None:
@@ -487,11 +751,20 @@ def render_dashboard() -> None:
             f"最新时间 {startup_sync_result.get('latest_timestamp') or '-'}。"
         )
 
-    control_col1, control_col2, _ = st.columns([1, 1, 4])
+    control_col1, control_col2, control_col3, _ = st.columns([1, 1, 1.2, 3.8])
     with control_col1:
         refresh_panel = st.button("刷新面板", type="primary", help="重新读取根目录 smart_money_cache.json，并重绘全部图表")
     with control_col2:
         sync_now = st.button("立即同步数据库", help="立刻按本地 latest_timestamp 拉取新增数据写入 JSON，并在本次运行中重绘图表")
+
+    with control_col3:
+        selected_period = st.selectbox(
+            "周期",
+            options=list(CHART_PERIOD_OPTIONS.keys()),
+            index=1,
+            key="smart_money_chart_period",
+            help="切换图表默认显示范围；拖拽任意多头或空头图表时，同组另外三张会同步。",
+        )
 
     if sync_now:
         result = controller.sync_now()
@@ -553,15 +826,29 @@ def render_dashboard() -> None:
         st.warning("当前数据集中没有可展示的指标。")
         return
 
-    x_min = df["timestamp"].min()
-    x_max = df["timestamp"].max()
+    data_min = df["timestamp"].min()
+    data_max = df["timestamp"].max()
+    x_min, x_max = resolve_chart_time_range(df, selected_period)
+    chart_df = filter_chart_dataframe(df, x_min, x_max)
+    chart_x_min = chart_df["timestamp"].min()
+    chart_x_max = chart_df["timestamp"].max()
     st.caption(
         f"当前图表展示全量本地数据：{x_min:%Y-%m-%d %H:%M:%S} 至 {x_max:%Y-%m-%d %H:%M:%S}。"
         "启动和手动同步会先按 latest_timestamp 追加数据库新增数据到本地 JSON，再读取本地文件绘图；"
         "后台 5 分钟同步只更新本地 JSON，不会自动刷新图表。"
     )
 
+    st.caption(
+        f"当前周期：{selected_period}，本地数据全量范围为 {data_min:%Y-%m-%d %H:%M:%S} 至 {data_max:%Y-%m-%d %H:%M:%S}。"
+        "拖拽任意一张多头图或空头图时，会同步同组另外三张图的时间范围。"
+    )
+
+    st.caption(
+        f"性能优化已启用：8 张小图当前只渲染 {selected_period} 周期窗口数据，范围为 {chart_x_min:%Y-%m-%d %H:%M:%S} 至 {chart_x_max:%Y-%m-%d %H:%M:%S}。"
+    )
+
     columns = st.columns(4)
+    rendered_chart_count = 0
     for index, target_column in enumerate(DEFAULT_METRIC_COLUMNS):
         with columns[index % 4]:
             default_index = next(
@@ -583,13 +870,18 @@ def render_dashboard() -> None:
             )
 
             figure = build_chart_figure(
-                df=df,
+                df=chart_df,
                 metric=selected_metric,
                 chart_index=index,
-                x_min=x_min,
-                x_max=x_max,
+                x_min=chart_x_min,
+                x_max=chart_x_max,
+                period_label=selected_period,
+                show_rangeslider=index in (0, 4),
             )
             st.plotly_chart(figure, width="stretch", key=f"smart_money_chart_{index}")
+            rendered_chart_count += 1
+
+    render_linked_time_axis_script(rendered_chart_count)
 
     structure32_df = add_structure32_columns(df, {})
 
