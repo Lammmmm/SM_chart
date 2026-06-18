@@ -73,6 +73,7 @@ CHART_PERIOD_OPTIONS = {
     "24H": pd.Timedelta(hours=24),
     "1W": pd.Timedelta(weeks=1),
     "1M": pd.Timedelta(days=30),
+    "all": None,
 }
 CHART_TOP_EMPTY_RATIO = 0.2
 CHART_LINE_BOTTOM_PADDING_RATIO = 0.05
@@ -534,6 +535,8 @@ def resolve_chart_time_range(df: pd.DataFrame, period_label: str) -> tuple[pd.Ti
     data_min = df["timestamp"].min()
     data_max = df["timestamp"].max()
     selected_window = CHART_PERIOD_OPTIONS.get(period_label, CHART_PERIOD_OPTIONS["1W"])
+    if selected_window is None:
+        return data_min, data_max
     return max(data_min, data_max - selected_window), data_max
 
 
