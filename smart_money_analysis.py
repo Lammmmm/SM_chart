@@ -31,7 +31,10 @@ LOSS_EPISODES_PATH = DERIVED_DIR / "smart_money_loss_episodes.parquet"
 ACTION_EVENTS_PATH = DERIVED_DIR / "smart_money_action_events.parquet"
 CHINESE_LOSS_EPISODES_PATH = DERIVED_DIR / "聪明钱亏损过程表_中文.parquet"
 CHINESE_ACTION_EVENTS_PATH = DERIVED_DIR / "聪明钱动作事件表_中文.parquet"
-ANALYSIS_LOGIC_VERSION = "2.0"
+ACTION_COMPARISON_PATH = DERIVED_DIR / "smart_money_action_definition_comparison.csv"
+CHINESE_ACTION_COMPARISON_PATH = DERIVED_DIR / "聪明钱动作定义对照_中文.csv"
+ANALYSIS_LOGIC_VERSION = "2.1"
+OBSOLETE_ACTIVE_REUSE_WINDOW_HOURS = 18
 
 STATE_ZH = {
     "UNAVAILABLE": "不可用",
@@ -112,7 +115,8 @@ COLUMN_ZH = {
     "cohort_refresh_start": "名单刷新开始时间", "cohort_refresh_end": "名单刷新结束时间",
     "cohort_stable_at": "名单稳定确认时间", "cohort_baseline_start": "基准构建开始时间",
     "cohort_baseline_end": "基准构建结束时间", "signal_eligible": "是否允许产生信号",
-    "out_of_sample": "是否为样本外数据", "baseline_price": "批次基准价格",
+    "out_of_sample": "是否为修正版逻辑样本外数据",
+    "logic_valid_from": "修正版逻辑生效时间", "baseline_price": "批次基准价格",
     "baseline_long_pos": "批次基准多头仓位", "baseline_short_pos": "批次基准空头仓位",
     "baseline_long_avg_price": "批次基准多头平均开仓价",
     "baseline_short_avg_price": "批次基准空头平均开仓价",
@@ -121,12 +125,31 @@ COLUMN_ZH = {
     "baseline_long_unrealized_pnl": "批次基准多头未实现盈亏",
     "baseline_short_unrealized_pnl": "批次基准空头未实现盈亏",
     "baseline_ls_ratio": "批次基准多空人数比",
-    "gross_position": "多空总仓位", "net_exposure": "净风险敞口",
-    "net_exposure_share": "净风险敞口占比", "cohort_net_flow": "批次净风险流",
-    "long_position_change_pct": "批次内多头仓位变化率",
-    "short_position_change_pct": "批次内空头仓位变化率",
-    "avg_long_position": "每位多头平均仓位", "avg_short_position": "每位空头平均仓位",
-    "avg_position_ratio": "多空人均仓位比", "long_directional_return": "多头方向收益",
+    "gross_position": "多空USDT名义总仓位（仅描述）",
+    "net_exposure": "净USDT名义风险敞口（仅描述）",
+    "net_exposure_share": "净名义风险敞口占比",
+    "long_qty_proxy": "多头BTC等价仓位代理",
+    "short_qty_proxy": "空头BTC等价仓位代理",
+    "gross_qty_proxy": "多空BTC等价总仓位代理",
+    "net_qty_proxy": "净BTC等价仓位代理",
+    "baseline_long_qty_proxy": "基准多头BTC等价仓位代理",
+    "baseline_short_qty_proxy": "基准空头BTC等价仓位代理",
+    "baseline_gross_qty_proxy": "基准多空BTC等价总仓位代理",
+    "baseline_net_qty_proxy": "基准净BTC等价仓位代理",
+    "cohort_net_flow": "批次净USDT名义风险流（兼容字段，仅描述）",
+    "cohort_net_notional_flow": "批次净USDT名义风险流（仅描述）",
+    "cohort_net_qty_flow": "聪明钱净BTC等价风险流",
+    "long_position_change_pct": "批次内多头USDT名义仓位变化率（仅描述）",
+    "short_position_change_pct": "批次内空头USDT名义仓位变化率（仅描述）",
+    "long_qty_change_pct": "批次内多头BTC等价仓位变化率",
+    "short_qty_change_pct": "批次内空头BTC等价仓位变化率",
+    "avg_long_position": "每位多头平均USDT名义仓位（仅描述）",
+    "avg_short_position": "每位空头平均USDT名义仓位（仅描述）",
+    "avg_position_ratio": "多空人均USDT名义仓位比（仅描述）",
+    "avg_long_qty_proxy_per_trader": "每位多头平均BTC等价仓位代理",
+    "avg_short_qty_proxy_per_trader": "每位空头平均BTC等价仓位代理",
+    "avg_qty_proxy_ratio": "多空人均BTC等价仓位代理比",
+    "long_directional_return": "多头方向收益",
     "short_directional_return": "空头方向收益", "long_loss_depth": "多头亏损深度",
     "short_loss_depth": "空头亏损深度", "long_avg_entry_change": "批次内多头平均开仓价变化",
     "short_avg_entry_change": "批次内空头平均开仓价变化",
@@ -159,11 +182,19 @@ COLUMN_ZH = {
     "event_price": "事件发生价格", "episode_id": "亏损过程编号",
     "action_event_id": "动作事件编号", "action_type": "动作类型",
     "action_timestamp": "动作发生时间", "action_price": "动作发生价格",
-    "action_position": "动作发生时仓位", "action_avg_entry": "动作发生时平均开仓价",
-    "position_change_since_loss": "亏损后仓位变化率",
+    "action_position": "动作发生时USDT名义仓位（仅描述）",
+    "action_avg_entry": "动作发生时平均开仓价",
+    "position_change_since_loss": "亏损后USDT名义仓位变化率（兼容字段，仅描述）",
+    "position_notional_change_since_loss": "亏损后USDT名义仓位变化率（仅描述）",
+    "position_qty_change_since_loss": "亏损后BTC等价仓位变化率",
+    "loss_start_position_qty_proxy": "亏损开始时BTC等价仓位代理",
+    "action_position_qty_proxy": "动作发生时BTC等价仓位代理",
+    "net_qty_proxy_at_action": "动作发生时净BTC等价仓位代理",
     "loss_depth_at_action": "动作发生时亏损深度",
     "loss_duration_at_action": "动作发生时亏损分钟数",
-    "cohort_net_flow_at_action": "动作发生时批次净风险流",
+    "cohort_net_flow_at_action": "动作发生时净USDT名义风险流（兼容字段，仅描述）",
+    "cohort_net_notional_flow_at_action": "动作发生时净USDT名义风险流（仅描述）",
+    "cohort_net_qty_flow_at_action": "动作发生时净BTC等价风险流",
     "net_exposure_at_action": "动作发生时净风险敞口",
     "avg_entry_change_since_loss": "亏损后平均开仓价变化",
     "action_sequence": "动作顺序", "recovery_timestamp": "恢复盈利时间",
@@ -171,13 +202,23 @@ COLUMN_ZH = {
     "episode_end_reason": "亏损过程结束原因",
     "event_type": "事件类型", "loss_start_timestamp": "亏损开始时间",
     "loss_end_timestamp": "亏损结束时间", "loss_start_price": "亏损开始价格",
-    "loss_end_price": "亏损结束价格", "loss_start_position": "亏损开始仓位",
+    "loss_end_price": "亏损结束价格",
+    "loss_start_position": "亏损开始USDT名义仓位（仅描述）",
     "max_position": "事件期间最大仓位", "min_position": "事件期间最小仓位",
     "loss_start_avg_entry": "亏损开始平均开仓价",
     "loss_end_avg_entry": "亏损结束平均开仓价",
     "loss_start_net_exposure": "亏损开始时净风险敞口",
     "max_loss_depth": "最大亏损深度", "max_loss_duration": "最长亏损分钟数",
-    "max_position_add_pct": "最大加仓比例", "max_position_reduce_pct": "最大减仓比例",
+    "max_position_add_pct": "USDT名义仓位最大增加比例（仅描述）",
+    "max_position_reduce_pct": "USDT名义仓位最大减少比例（仅描述）",
+    "max_qty_add_pct": "BTC等价仓位最大增加比例",
+    "max_qty_reduce_pct": "BTC等价仓位最大减少比例",
+    "max_position_qty_proxy": "过程内最大BTC等价仓位代理",
+    "min_position_qty_proxy": "过程内最小BTC等价仓位代理",
+    "cohort_net_notional_flow_at_start": "过程开始时净USDT名义风险流（仅描述）",
+    "cohort_net_notional_flow_at_end": "过程结束时净USDT名义风险流（仅描述）",
+    "cohort_net_qty_flow_at_start": "过程开始时净BTC等价风险流",
+    "cohort_net_qty_flow_at_end": "过程结束时净BTC等价风险流",
     "final_response": "最终操作", "recovered": "是否恢复盈利",
     "recovery_event_type": "恢复盈利事件类型", "event_status": "事件状态",
     "cohort_net_flow_at_start": "事件开始时批次净风险流",
@@ -197,10 +238,44 @@ COLUMN_ZH = {
     "difference_vs_unconditional": "相对无条件基准的超额收益",
     "directional_success_rate": "方向正确比例", "sample_size_warning": "样本量提示",
     "final_response_note": "最终操作说明",
+    "active_refresh_new_segment": "是否因有效批次后刷新而强制新分段",
+    "old_rule_would_reuse_active_segment": "旧规则是否会错误复用有效批次编号",
+    "comparison_status": "新旧动作定义对照结果",
+    "old_notional_action_timestamp": "旧USDT名义动作时间",
+    "new_qty_action_timestamp": "新BTC等价数量动作时间",
+    "timestamp_difference_minutes": "新旧动作时间差分钟数",
+    "long_action_event": "是否触发多头首次动作事件",
+    "short_action_event": "是否触发空头首次动作事件",
+    "long_action_type": "多头首次动作类型",
+    "short_action_type": "空头首次动作类型",
+    "long_action_event_id": "多头首次动作事件编号",
+    "short_action_event_id": "空头首次动作事件编号",
+    "long_loss_start_position_qty_proxy": "多头亏损开始时BTC等价仓位代理",
+    "short_loss_start_position_qty_proxy": "空头亏损开始时BTC等价仓位代理",
+    "long_position_notional_change_since_loss": "多头亏损后USDT名义仓位变化率（仅描述）",
+    "short_position_notional_change_since_loss": "空头亏损后USDT名义仓位变化率（仅描述）",
+    "long_position_qty_change_since_loss": "多头亏损后BTC等价仓位变化率",
+    "short_position_qty_change_since_loss": "空头亏损后BTC等价仓位变化率",
 }
+_STRUCTURAL_FIELD_ZH = {
+    "total_traders": "交易者总人数",
+    "long_traders": "多头交易者人数",
+    "short_traders": "空头交易者人数",
+    "long_avg_price": "多头平均开仓价",
+    "short_avg_price": "空头平均开仓价",
+    "long_qty_proxy": "多头BTC等价仓位代理",
+    "short_qty_proxy": "空头BTC等价仓位代理",
+    "long_unrealized_pnl": "多头未实现盈亏",
+    "short_unrealized_pnl": "空头未实现盈亏",
+    "ls_ratio": "多空人数比",
+}
+for _field, _field_zh in _STRUCTURAL_FIELD_ZH.items():
+    COLUMN_ZH[f"structural_z_{_field}"] = f"{_field_zh}结构异常稳健分数"
 for _hours in (1, 2, 4, 6, 12, 24):
     COLUMN_ZH[f"btc_return_{_hours}h"] = f"比特币过去{_hours}小时收益"
     COLUMN_ZH[f"cohort_net_flow_change_{_hours}h"] = f"批次净风险流过去{_hours}小时变化"
+    COLUMN_ZH[f"cohort_net_notional_flow_change_{_hours}h"] = f"净USDT名义风险流过去{_hours}小时变化（仅描述）"
+    COLUMN_ZH[f"cohort_net_qty_flow_change_{_hours}h"] = f"净BTC等价风险流过去{_hours}小时变化"
     COLUMN_ZH[f"divergence_{_hours}h"] = f"过去{_hours}小时价格资金流背离"
     COLUMN_ZH[f"forward_return_{_hours}h"] = f"事件后{_hours}小时比特币收益"
     COLUMN_ZH[f"forward_price_timestamp_{_hours}h"] = f"事件后{_hours}小时价格采样时间"
@@ -214,6 +289,8 @@ for _prefix, _action_name in (("first_add", "首次加仓"), ("first_reduce", "�
     COLUMN_ZH[f"{_prefix}_loss_duration"] = f"{_action_name}时亏损分钟数"
     COLUMN_ZH[f"{_prefix}_net_exposure"] = f"{_action_name}时净风险敞口"
     COLUMN_ZH[f"{_prefix}_cohort_net_flow"] = f"{_action_name}时批次净风险流"
+    COLUMN_ZH[f"{_prefix}_position_qty_proxy"] = f"{_action_name}时BTC等价仓位代理"
+    COLUMN_ZH[f"{_prefix}_cohort_net_qty_flow"] = f"{_action_name}时净BTC等价风险流"
 
 NUMERIC_COLUMNS = [
     "current_price", "funding_rate", "long_avg_price", "short_avg_price",
@@ -227,6 +304,7 @@ CORE_REQUIRED_COLUMNS = [
 ]
 DEFAULT_CONFIG: dict[str, Any] = {
     "model_freeze_date": "2026-08-27T01:42:59Z",
+    "logic_valid_from": "2026-08-27T04:27:07Z",
     "cohort": {
         "total_trader_change_threshold": 0.08,
         "side_trader_change_threshold": 0.12,
@@ -246,15 +324,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "structural_mad_epsilon": 1e-9,
         "refresh_prior_tolerance_minutes": 120,
         "refresh_prior_min_samples": 3,
-        "min_refresh_separation_hours": 18,
         "structural_min_abs_change": {
             "total_traders": 0.01,
             "long_traders": 0.015,
             "short_traders": 0.015,
             "long_avg_price": 0.005,
             "short_avg_price": 0.005,
-            "long_pos_usdt": 0.10,
-            "short_pos_usdt": 0.10,
+            "long_qty_proxy": 0.10,
+            "short_qty_proxy": 0.10,
             "long_unrealized_pnl": 0.25,
             "short_unrealized_pnl": 0.25,
             "ls_ratio": 0.05,
@@ -265,8 +342,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "short_traders": 2.0,
             "long_avg_price": 2.0,
             "short_avg_price": 2.0,
-            "long_pos_usdt": 1.0,
-            "short_pos_usdt": 1.0,
+            "long_qty_proxy": 1.0,
+            "short_qty_proxy": 1.0,
             "long_unrealized_pnl": 0.5,
             "short_unrealized_pnl": 0.5,
             "ls_ratio": 1.0,
@@ -321,7 +398,16 @@ def load_analysis_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     config = _deep_merge(DEFAULT_CONFIG, section)
     if pd.isna(pd.to_datetime(config["model_freeze_date"], utc=True, errors="coerce")):
         raise ValueError("model_freeze_date 必须是带时区的有效时间")
+    if pd.isna(pd.to_datetime(config["logic_valid_from"], utc=True, errors="coerce")):
+        raise ValueError("logic_valid_from 必须是带时区的有效时间")
     return config
+
+
+def _out_of_sample_start(config: dict[str, Any]) -> pd.Timestamp:
+    return max(
+        pd.to_datetime(config["model_freeze_date"], utc=True),
+        pd.to_datetime(config["logic_valid_from"], utc=True),
+    )
 
 
 def load_raw_records(path: Path = RAW_CACHE_PATH) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -411,6 +497,9 @@ def prepare_raw_frame(records: list[dict[str, Any]], config: dict[str, Any]) -> 
     frame["_timestamp_out_of_order"] = original_timestamp.diff().dt.total_seconds().lt(0).fillna(False)
     frame["timestamp"] = original_timestamp
     frame = frame.sort_values(["timestamp", "_source_order"], kind="stable", na_position="last").reset_index(drop=True)
+    valid_price = frame["current_price"].gt(0)
+    frame["long_qty_proxy"] = frame["long_pos_usdt"].div(frame["current_price"]).where(valid_price)
+    frame["short_qty_proxy"] = frame["short_pos_usdt"].div(frame["current_price"]).where(valid_price)
     frame["data_quality_flag"], frame["_quality_signal_ok"] = _quality_flags(frame, config)
     return frame
 
@@ -419,6 +508,8 @@ BASELINE_COLUMNS = {
     "price": "current_price",
     "long_pos": "long_pos_usdt",
     "short_pos": "short_pos_usdt",
+    "long_qty_proxy": "long_qty_proxy",
+    "short_qty_proxy": "short_qty_proxy",
     "long_avg_price": "long_avg_price",
     "short_avg_price": "short_avg_price",
     "long_traders": "long_traders",
@@ -437,8 +528,13 @@ def _build_baseline(rows: list[dict[str, Any]]) -> dict[str, float] | None:
         target: float(pd.to_numeric(data[source], errors="coerce").median())
         for target, source in BASELINE_COLUMNS.items()
     }
+    baseline["gross_qty_proxy"] = baseline["long_qty_proxy"] + baseline["short_qty_proxy"]
+    baseline["net_qty_proxy"] = baseline["long_qty_proxy"] - baseline["short_qty_proxy"]
     if any(pd.isna(baseline[name]) or baseline[name] <= 0
-           for name in ("price", "long_pos", "short_pos", "long_avg_price", "short_avg_price")):
+           for name in (
+               "price", "long_pos", "short_pos", "long_qty_proxy", "short_qty_proxy",
+               "long_avg_price", "short_avg_price",
+           )):
         return None
     return baseline
 
@@ -450,8 +546,15 @@ def _blank_features() -> dict[str, Any]:
         "baseline_long_traders", "baseline_short_traders",
         "baseline_long_unrealized_pnl", "baseline_short_unrealized_pnl",
         "gross_position", "net_exposure", "net_exposure_share", "cohort_net_flow",
+        "cohort_net_notional_flow", "gross_qty_proxy", "net_qty_proxy",
+        "cohort_net_qty_flow",
+        "baseline_long_qty_proxy", "baseline_short_qty_proxy",
+        "baseline_gross_qty_proxy", "baseline_net_qty_proxy",
         "long_position_change_pct", "short_position_change_pct",
+        "long_qty_change_pct", "short_qty_change_pct",
         "avg_long_position", "avg_short_position", "avg_position_ratio",
+        "avg_long_qty_proxy_per_trader", "avg_short_qty_proxy_per_trader",
+        "avg_qty_proxy_ratio",
         "long_directional_return", "short_directional_return",
         "long_loss_depth", "short_loss_depth", "long_avg_entry_change",
         "short_avg_entry_change", "ls_ratio_change_within_cohort",
@@ -669,27 +772,38 @@ def add_divergence_features(processed: pd.DataFrame, config: dict[str, Any]) -> 
     for hours in cfg["windows_hours"]:
         result[f"btc_return_{hours}h"] = np.nan
         result[f"cohort_net_flow_change_{hours}h"] = np.nan
+        result[f"cohort_net_notional_flow_change_{hours}h"] = np.nan
+        result[f"cohort_net_qty_flow_change_{hours}h"] = np.nan
         result[f"divergence_{hours}h"] = None
     active = result[result["signal_eligible"] & result["timestamp"].notna()]
     for _, group in active.groupby("cohort_id", sort=False):
         indices = group.index.to_numpy()
         times = group["timestamp"].astype("int64").to_numpy()
         prices = group["current_price"].to_numpy(dtype=float)
-        flows = group["cohort_net_flow"].to_numpy(dtype=float)
+        notional_flows = group["cohort_net_notional_flow"].to_numpy(dtype=float)
+        qty_flows = group["cohort_net_qty_flow"].to_numpy(dtype=float)
         for hours in cfg["windows_hours"]:
             delta_ns = int(pd.Timedelta(hours=float(hours)).value)
             for position, current_ns in enumerate(times):
                 past = int(np.searchsorted(times, current_ns - delta_ns, side="right") - 1)
-                if past < 0 or prices[past] <= 0 or not np.isfinite(flows[past]):
+                if (
+                    past < 0 or prices[past] <= 0
+                    or not np.isfinite(qty_flows[past])
+                    or not np.isfinite(qty_flows[position])
+                ):
                     continue
                 price_return = prices[position] / prices[past] - 1
-                flow_change = flows[position] - flows[past]
+                qty_flow_change = qty_flows[position] - qty_flows[past]
                 row_index = indices[position]
                 result.at[row_index, f"btc_return_{hours}h"] = price_return
-                result.at[row_index, f"cohort_net_flow_change_{hours}h"] = flow_change
-                if abs(price_return) <= cfg["flat_price_threshold"] and flow_change >= cfg["flow_threshold"]:
+                result.at[row_index, f"cohort_net_qty_flow_change_{hours}h"] = qty_flow_change
+                if np.isfinite(notional_flows[past]) and np.isfinite(notional_flows[position]):
+                    notional_change = notional_flows[position] - notional_flows[past]
+                    result.at[row_index, f"cohort_net_flow_change_{hours}h"] = notional_change
+                    result.at[row_index, f"cohort_net_notional_flow_change_{hours}h"] = notional_change
+                if abs(price_return) <= cfg["flat_price_threshold"] and qty_flow_change >= cfg["flow_threshold"]:
                     result.at[row_index, f"divergence_{hours}h"] = "BULLISH_SM_DIVERGENCE"
-                elif abs(price_return) <= cfg["flat_price_threshold"] and flow_change <= -cfg["flow_threshold"]:
+                elif abs(price_return) <= cfg["flat_price_threshold"] and qty_flow_change <= -cfg["flow_threshold"]:
                     result.at[row_index, f"divergence_{hours}h"] = "BEARISH_SM_DIVERGENCE"
     return result
 
@@ -754,8 +868,10 @@ def _obsolete_v1_build_loss_events(processed: pd.DataFrame, config: dict[str, An
         )
         for suffix in [
             "loss_start_price", "loss_start_position", "loss_start_avg_entry",
+            "loss_start_position_qty_proxy",
             "loss_start_net_exposure", "loss_duration_minutes",
-            "position_change_since_loss", "avg_entry_change_since_loss",
+            "position_change_since_loss", "position_notional_change_since_loss",
+            "position_qty_change_since_loss", "avg_entry_change_since_loss",
         ]:
             result[f"{side}_{suffix}"] = np.nan
         result[f"{side}_loss_response"] = None
@@ -985,7 +1101,7 @@ def _obsolete_v1_build_backtest(events: pd.DataFrame, config: dict[str, Any]) ->
 
 STRUCTURAL_FIELDS = (
     "total_traders", "long_traders", "short_traders",
-    "long_avg_price", "short_avg_price", "long_pos_usdt", "short_pos_usdt",
+    "long_avg_price", "short_avg_price", "long_qty_proxy", "short_qty_proxy",
     "long_unrealized_pnl", "short_unrealized_pnl", "ls_ratio",
 )
 STRUCTURAL_PRIMARY_FIELDS = {
@@ -1055,6 +1171,9 @@ def _v2_blank_features(config: dict[str, Any]) -> dict[str, Any]:
         "backtest_primary": False,
         "data_gap_detected": False,
         "cohort_expired_now": False,
+        "active_refresh_new_segment": False,
+        "old_rule_would_reuse_active_segment": False,
+        "logic_valid_from": config["logic_valid_from"],
     })
     for field in config["cohort"]["structural_weights"]:
         result[f"structural_z_{field}"] = math.nan
@@ -1068,7 +1187,7 @@ def reconstruct_cohorts(
     if raw_frame.empty:
         return raw_frame.copy(), pd.DataFrame()
     cfg = config["cohort"]
-    freeze = pd.to_datetime(config["model_freeze_date"], utc=True)
+    oos_start = _out_of_sample_start(config)
     feature_rows: list[dict[str, Any]] = []
     cohort_rows: list[dict[str, Any]] = []
     delta_history: dict[str, list[tuple[pd.Timestamp, float]]] = {
@@ -1132,7 +1251,8 @@ def reconstruct_cohorts(
             "record_count": 0,
             "signal_eligible_records": 0,
             "expired_records": 0,
-            "out_of_sample": bool(timestamp >= freeze),
+            "out_of_sample": bool(timestamp >= oos_start),
+            "logic_valid_from": config["logic_valid_from"],
             "final_state": state,
         }
 
@@ -1264,6 +1384,8 @@ def reconstruct_cohorts(
 
         detected_now = False
         expired_now = False
+        active_refresh_new_segment = False
+        old_rule_would_reuse_active_segment = False
         if cohort_id is None:
             start_cohort(
                 timestamp,
@@ -1272,18 +1394,9 @@ def reconstruct_cohorts(
                 score=0.0,
                 reason="INITIAL_DATA",
             )
-        elif state != "REFRESHING" and refresh_candidate:
+        elif refresh_candidate:
             reason = "HARD_TRADER_JUMP" if hard_trigger else "STRUCTURAL_BREAK"
-            within_same_refresh_episode = bool(
-                state in {"STABILIZING", "BASELINE_BUILDING"}
-                or (
-                    state == "ACTIVE_COHORT"
-                    and last_refresh_timestamp is not None
-                    and (timestamp - last_refresh_timestamp).total_seconds() / 3600
-                    < float(cfg["min_refresh_separation_hours"])
-                )
-            )
-            if within_same_refresh_episode:
+            if state in {"REFRESHING", "STABILIZING", "BASELINE_BUILDING"}:
                 upgraded_to_high = reset_refresh_in_place(
                     timestamp,
                     new_confidence=trigger_confidence,
@@ -1293,6 +1406,13 @@ def reconstruct_cohorts(
                 if upgraded_to_high:
                     high_refresh_minutes.append(timestamp.hour * 60 + timestamp.minute)
             else:
+                active_refresh_new_segment = state == "ACTIVE_COHORT"
+                old_rule_would_reuse_active_segment = bool(
+                    active_refresh_new_segment
+                    and last_refresh_timestamp is not None
+                    and (timestamp - last_refresh_timestamp).total_seconds() / 3600
+                    < OBSOLETE_ACTIVE_REUSE_WINDOW_HOURS
+                )
                 start_cohort(
                     timestamp,
                     detected=True,
@@ -1382,21 +1502,32 @@ def reconstruct_cohorts(
             "cohort_baseline_end": baseline_end,
             "signal_eligible": comparable,
             "backtest_primary": comparable,
-            "out_of_sample": bool(timestamp >= freeze),
+            "out_of_sample": bool(timestamp >= oos_start),
+            "logic_valid_from": config["logic_valid_from"],
             "data_gap_detected": gap_detected,
             "cohort_expired_now": expired_now,
+            "active_refresh_new_segment": active_refresh_new_segment,
+            "old_rule_would_reuse_active_segment": old_rule_would_reuse_active_segment,
             **{f"structural_z_{field}": value for field, value in z_scores.items()},
         })
         gross = row["long_pos_usdt"] + row["short_pos_usdt"]
         net = row["long_pos_usdt"] - row["short_pos_usdt"]
+        long_qty_proxy = row["long_qty_proxy"]
+        short_qty_proxy = row["short_qty_proxy"]
+        gross_qty_proxy = long_qty_proxy + short_qty_proxy
+        net_qty_proxy = long_qty_proxy - short_qty_proxy
         long_return = _safe_ratio(row["current_price"], row["long_avg_price"]) - 1
         short_return = _safe_ratio(row["short_avg_price"], row["current_price"]) - 1
         output.update({
             "gross_position": gross,
             "net_exposure": net,
             "net_exposure_share": _safe_ratio(net, gross) if gross > 0 else math.nan,
+            "gross_qty_proxy": gross_qty_proxy,
+            "net_qty_proxy": net_qty_proxy,
             "avg_long_position": _safe_ratio(row["long_pos_usdt"], row["long_traders"]),
             "avg_short_position": _safe_ratio(row["short_pos_usdt"], row["short_traders"]),
+            "avg_long_qty_proxy_per_trader": _safe_ratio(long_qty_proxy, row["long_traders"]),
+            "avg_short_qty_proxy_per_trader": _safe_ratio(short_qty_proxy, row["short_traders"]),
             "long_directional_return": long_return,
             "short_directional_return": short_return,
             "long_loss_depth": max(0.0, -long_return) if not pd.isna(long_return) else math.nan,
@@ -1405,7 +1536,22 @@ def reconstruct_cohorts(
         output["avg_position_ratio"] = _safe_ratio(
             output["avg_long_position"], output["avg_short_position"]
         )
+        output["avg_qty_proxy_ratio"] = _safe_ratio(
+            output["avg_long_qty_proxy_per_trader"],
+            output["avg_short_qty_proxy_per_trader"],
+        )
         if comparable and baseline is not None:
+            notional_flow = _safe_ratio(
+                net - (baseline["long_pos"] - baseline["short_pos"]),
+                baseline["long_pos"] + baseline["short_pos"],
+            )
+            qty_flow = (
+                _safe_ratio(
+                    net_qty_proxy - baseline["net_qty_proxy"],
+                    baseline["gross_qty_proxy"],
+                )
+                if baseline["gross_qty_proxy"] > 0 else math.nan
+            )
             output.update({
                 "baseline_price": baseline["price"],
                 "baseline_long_pos": baseline["long_pos"],
@@ -1416,12 +1562,17 @@ def reconstruct_cohorts(
                 "baseline_short_traders": baseline["short_traders"],
                 "baseline_long_unrealized_pnl": baseline["long_unrealized_pnl"],
                 "baseline_short_unrealized_pnl": baseline["short_unrealized_pnl"],
-                "cohort_net_flow": _safe_ratio(
-                    net - (baseline["long_pos"] - baseline["short_pos"]),
-                    baseline["long_pos"] + baseline["short_pos"],
-                ),
+                "baseline_long_qty_proxy": baseline["long_qty_proxy"],
+                "baseline_short_qty_proxy": baseline["short_qty_proxy"],
+                "baseline_gross_qty_proxy": baseline["gross_qty_proxy"],
+                "baseline_net_qty_proxy": baseline["net_qty_proxy"],
+                "cohort_net_flow": notional_flow,
+                "cohort_net_notional_flow": notional_flow,
+                "cohort_net_qty_flow": qty_flow,
                 "long_position_change_pct": _safe_ratio(row["long_pos_usdt"], baseline["long_pos"]) - 1,
                 "short_position_change_pct": _safe_ratio(row["short_pos_usdt"], baseline["short_pos"]) - 1,
+                "long_qty_change_pct": _safe_ratio(long_qty_proxy, baseline["long_qty_proxy"]) - 1,
+                "short_qty_change_pct": _safe_ratio(short_qty_proxy, baseline["short_qty_proxy"]) - 1,
                 "long_avg_entry_change": _safe_ratio(row["long_avg_price"], baseline["long_avg_price"]) - 1,
                 "short_avg_entry_change": _safe_ratio(row["short_avg_price"], baseline["short_avg_price"]) - 1,
                 "ls_ratio_change_within_cohort": _safe_ratio(row["ls_ratio"], baseline["ls_ratio"]) - 1,
@@ -1512,13 +1663,19 @@ def build_loss_event_tables(
         if row is not None:
             timestamp = row["timestamp"]
             position = row[f"{side}_pos_usdt"]
-            change = _safe_ratio(position, episode["loss_start_position"]) - 1
+            qty_proxy = row[f"{side}_qty_proxy"]
+            notional_change = _safe_ratio(position, episode["loss_start_position"]) - 1
+            qty_change = _safe_ratio(
+                qty_proxy, episode["loss_start_position_qty_proxy"]
+            ) - 1
             episode["episode_end_timestamp"] = timestamp
             episode["loss_end_timestamp"] = timestamp
             episode["loss_end_price"] = row["current_price"]
             episode["loss_end_avg_entry"] = row[f"{side}_avg_price"]
             episode["cohort_net_flow_at_end"] = row["cohort_net_flow"]
-            episode["final_response"] = _response(change, cfg)
+            episode["cohort_net_notional_flow_at_end"] = row["cohort_net_notional_flow"]
+            episode["cohort_net_qty_flow_at_end"] = row["cohort_net_qty_flow"]
+            episode["final_response"] = _response(qty_change, cfg)
             episode["max_loss_duration"] = max(
                 episode["max_loss_duration"],
                 (timestamp - episode["loss_start_timestamp"]).total_seconds() / 60,
@@ -1536,9 +1693,9 @@ def build_loss_event_tables(
             episode["max_loss_duration"]
         )
         episode["position_response_bucket"] = _position_bucket(
-            episode["max_position_add_pct"]
+            episode["max_qty_add_pct"]
             if episode["final_response"] == "ADD"
-            else episode["max_position_reduce_pct"]
+            else episode["max_qty_reduce_pct"]
             if episode["final_response"] == "REDUCE"
             else 0.0
         )
@@ -1578,6 +1735,7 @@ def build_loss_event_tables(
         for side in ("long", "short"):
             directional_return = row[f"{side}_directional_return"]
             position = row[f"{side}_pos_usdt"]
+            qty_proxy = row[f"{side}_qty_proxy"]
             avg_entry = row[f"{side}_avg_price"]
             baseline_return = (
                 _safe_ratio(row["baseline_price"], row["baseline_long_avg_price"]) - 1
@@ -1613,30 +1771,39 @@ def build_loss_event_tables(
                         "loss_start_timestamp": timestamp,
                         "loss_start_price": row["current_price"],
                         "loss_start_position": position,
+                        "loss_start_position_qty_proxy": qty_proxy,
                         "loss_start_avg_entry": avg_entry,
                         "loss_start_net_exposure": row["net_exposure"],
                         "max_position": position,
                         "min_position": position,
+                        "max_position_qty_proxy": qty_proxy,
+                        "min_position_qty_proxy": qty_proxy,
                         "max_loss_depth": row[f"{side}_loss_depth"],
                         "max_loss_duration": 0.0,
                         "max_position_add_pct": 0.0,
                         "max_position_reduce_pct": 0.0,
+                        "max_qty_add_pct": 0.0,
+                        "max_qty_reduce_pct": 0.0,
                         "first_add_timestamp": pd.NaT,
                         "first_add_price": np.nan,
                         "first_add_position": np.nan,
+                        "first_add_position_qty_proxy": np.nan,
                         "first_add_avg_entry": np.nan,
                         "first_add_loss_depth": np.nan,
                         "first_add_loss_duration": np.nan,
                         "first_add_net_exposure": np.nan,
                         "first_add_cohort_net_flow": np.nan,
+                        "first_add_cohort_net_qty_flow": np.nan,
                         "first_reduce_timestamp": pd.NaT,
                         "first_reduce_price": np.nan,
                         "first_reduce_position": np.nan,
+                        "first_reduce_position_qty_proxy": np.nan,
                         "first_reduce_avg_entry": np.nan,
                         "first_reduce_loss_depth": np.nan,
                         "first_reduce_loss_duration": np.nan,
                         "first_reduce_net_exposure": np.nan,
                         "first_reduce_cohort_net_flow": np.nan,
+                        "first_reduce_cohort_net_qty_flow": np.nan,
                         "recovery_timestamp": pd.NaT,
                         "recovery_price": np.nan,
                         "episode_end_timestamp": pd.NaT,
@@ -1646,8 +1813,12 @@ def build_loss_event_tables(
                         "loss_end_avg_entry": np.nan,
                         "cohort_net_flow_at_start": row["cohort_net_flow"],
                         "cohort_net_flow_at_end": np.nan,
+                        "cohort_net_notional_flow_at_start": row["cohort_net_notional_flow"],
+                        "cohort_net_notional_flow_at_end": np.nan,
+                        "cohort_net_qty_flow_at_start": row["cohort_net_qty_flow"],
+                        "cohort_net_qty_flow_at_end": np.nan,
                         "final_response": "HOLD",
-                        "final_response_note": "DESCRIPTIVE_ONLY_NOT_FOR_CAUSAL_BACKTEST",
+                        "final_response_note": "DESCRIPTIVE_ONLY_QUANTITY_BASED_NOT_FOR_CAUSAL_BACKTEST",
                         "recovered": False,
                         "event_status": "OPEN",
                         "out_of_sample": bool(row["out_of_sample"]),
@@ -1663,15 +1834,24 @@ def build_loss_event_tables(
                 duration = (
                     timestamp - episode["loss_start_timestamp"]
                 ).total_seconds() / 60
-                position_change = (
+                notional_change = (
                     _safe_ratio(position, episode["loss_start_position"]) - 1
+                )
+                qty_change = (
+                    _safe_ratio(qty_proxy, episode["loss_start_position_qty_proxy"]) - 1
                 )
                 avg_entry_change = (
                     _safe_ratio(avg_entry, episode["loss_start_avg_entry"]) - 1
                 )
-                response = _response(position_change, cfg)
+                response = _response(qty_change, cfg)
                 episode["max_position"] = max(episode["max_position"], position)
                 episode["min_position"] = min(episode["min_position"], position)
+                episode["max_position_qty_proxy"] = max(
+                    episode["max_position_qty_proxy"], qty_proxy
+                )
+                episode["min_position_qty_proxy"] = min(
+                    episode["min_position_qty_proxy"], qty_proxy
+                )
                 episode["max_loss_depth"] = max(
                     episode["max_loss_depth"], row[f"{side}_loss_depth"]
                 )
@@ -1679,26 +1859,35 @@ def build_loss_event_tables(
                     episode["max_loss_duration"], duration
                 )
                 episode["max_position_add_pct"] = max(
-                    episode["max_position_add_pct"], position_change
+                    episode["max_position_add_pct"], notional_change
                 )
                 episode["max_position_reduce_pct"] = min(
-                    episode["max_position_reduce_pct"], position_change
+                    episode["max_position_reduce_pct"], notional_change
+                )
+                episode["max_qty_add_pct"] = max(
+                    episode["max_qty_add_pct"], qty_change
+                )
+                episode["max_qty_reduce_pct"] = min(
+                    episode["max_qty_reduce_pct"], qty_change
                 )
                 episode["final_response"] = response
                 result.at[index, f"{side}_loss_event_id"] = episode["episode_id"]
                 result.at[index, f"{side}_loss_start_timestamp"] = episode["loss_start_timestamp"]
                 result.at[index, f"{side}_loss_start_price"] = episode["loss_start_price"]
                 result.at[index, f"{side}_loss_start_position"] = episode["loss_start_position"]
+                result.at[index, f"{side}_loss_start_position_qty_proxy"] = episode["loss_start_position_qty_proxy"]
                 result.at[index, f"{side}_loss_start_avg_entry"] = episode["loss_start_avg_entry"]
                 result.at[index, f"{side}_loss_start_net_exposure"] = episode["loss_start_net_exposure"]
                 result.at[index, f"{side}_loss_duration_minutes"] = duration
-                result.at[index, f"{side}_position_change_since_loss"] = position_change
+                result.at[index, f"{side}_position_change_since_loss"] = notional_change
+                result.at[index, f"{side}_position_notional_change_since_loss"] = notional_change
+                result.at[index, f"{side}_position_qty_change_since_loss"] = qty_change
                 result.at[index, f"{side}_avg_entry_change_since_loss"] = avg_entry_change
                 result.at[index, f"{side}_loss_response"] = response
 
                 for action_type, threshold_met in (
-                    ("ADD", position_change >= cfg["add_threshold"]),
-                    ("REDUCE", position_change <= cfg["reduce_threshold"]),
+                    ("ADD", qty_change >= cfg["add_threshold"]),
+                    ("REDUCE", qty_change <= cfg["reduce_threshold"]),
                 ):
                     seen_key = f"_seen_{action_type.lower()}"
                     if not episode[seen_key] and threshold_met:
@@ -1721,13 +1910,21 @@ def build_loss_event_tables(
                             "action_timestamp": timestamp,
                             "action_price": row["current_price"],
                             "action_position": position,
+                            "action_position_qty_proxy": qty_proxy,
                             "action_avg_entry": avg_entry,
-                            "position_change_since_loss": position_change,
+                            "loss_start_position": episode["loss_start_position"],
+                            "loss_start_position_qty_proxy": episode["loss_start_position_qty_proxy"],
+                            "position_change_since_loss": notional_change,
+                            "position_notional_change_since_loss": notional_change,
+                            "position_qty_change_since_loss": qty_change,
                             "avg_entry_change_since_loss": avg_entry_change,
                             "loss_depth_at_action": row[f"{side}_loss_depth"],
                             "loss_duration_at_action": duration,
                             "cohort_net_flow_at_action": row["cohort_net_flow"],
+                            "cohort_net_notional_flow_at_action": row["cohort_net_notional_flow"],
+                            "cohort_net_qty_flow_at_action": row["cohort_net_qty_flow"],
                             "net_exposure_at_action": row["net_exposure"],
+                            "net_qty_proxy_at_action": row["net_qty_proxy"],
                             "loss_start_timestamp": episode["loss_start_timestamp"],
                             "loss_start_price": episode["loss_start_price"],
                             "out_of_sample": bool(row["out_of_sample"]),
@@ -1737,11 +1934,13 @@ def build_loss_event_tables(
                         episode[f"{prefix}_timestamp"] = timestamp
                         episode[f"{prefix}_price"] = row["current_price"]
                         episode[f"{prefix}_position"] = position
+                        episode[f"{prefix}_position_qty_proxy"] = qty_proxy
                         episode[f"{prefix}_avg_entry"] = avg_entry
                         episode[f"{prefix}_loss_depth"] = row[f"{side}_loss_depth"]
                         episode[f"{prefix}_loss_duration"] = duration
                         episode[f"{prefix}_net_exposure"] = row["net_exposure"]
                         episode[f"{prefix}_cohort_net_flow"] = row["cohort_net_flow"]
+                        episode[f"{prefix}_cohort_net_qty_flow"] = row["cohort_net_qty_flow"]
                         result.at[index, f"{side}_action_event"] = True
                         result.at[index, f"{side}_action_type"] = action_type
                         result.at[index, f"{side}_action_event_id"] = action_event_id
@@ -1804,6 +2003,77 @@ def build_loss_events(
     """Compatibility wrapper; causal users should use build_loss_event_tables."""
     result, _, _, events = build_loss_event_tables(processed, config)
     return result, events
+
+
+def build_action_definition_comparison(
+    episodes: pd.DataFrame,
+    actions: pd.DataFrame,
+    processed: pd.DataFrame,
+    config: dict[str, Any],
+) -> pd.DataFrame:
+    """Compare obsolete USDT-notional actions with current quantity-proxy actions."""
+    columns = [
+        "analysis_logic_version", "side", "episode_id", "action_type",
+        "loss_start_timestamp", "old_notional_action_timestamp",
+        "new_qty_action_timestamp", "timestamp_difference_minutes",
+        "comparison_status",
+    ]
+    if episodes.empty:
+        return pd.DataFrame(columns=columns)
+    action_times = {
+        (str(row["episode_id"]), str(row["action_type"])): row["action_timestamp"]
+        for _, row in actions.iterrows()
+    } if not actions.empty else {}
+    rows: list[dict[str, Any]] = []
+    for _, episode in episodes.iterrows():
+        side = str(episode["side"])
+        side_lower = side.lower()
+        start = episode["loss_start_timestamp"]
+        end = episode["episode_end_timestamp"]
+        timeline = processed[
+            processed["cohort_id"].eq(episode["cohort_id"])
+            & processed["signal_eligible"]
+            & processed["timestamp"].ge(start)
+            & processed["timestamp"].le(end)
+        ]
+        notional_change = (
+            timeline[f"{side_lower}_pos_usdt"]
+            .div(float(episode["loss_start_position"]))
+            .sub(1.0)
+        )
+        for action_type, mask in (
+            ("ADD", notional_change.ge(config["loss"]["add_threshold"])),
+            ("REDUCE", notional_change.le(config["loss"]["reduce_threshold"])),
+        ):
+            matching = timeline.loc[mask, "timestamp"]
+            old_timestamp = matching.iloc[0] if not matching.empty else pd.NaT
+            new_timestamp = action_times.get(
+                (str(episode["episode_id"]), action_type), pd.NaT
+            )
+            if pd.isna(old_timestamp) and pd.isna(new_timestamp):
+                status = "NEITHER"
+                difference = math.nan
+            elif not pd.isna(old_timestamp) and pd.isna(new_timestamp):
+                status = "DISAPPEARED"
+                difference = math.nan
+            elif pd.isna(old_timestamp) and not pd.isna(new_timestamp):
+                status = "NEW"
+                difference = math.nan
+            else:
+                difference = (new_timestamp - old_timestamp).total_seconds() / 60
+                status = "EXACT_MATCH" if difference == 0 else "TIMESTAMP_CHANGED"
+            rows.append({
+                "analysis_logic_version": ANALYSIS_LOGIC_VERSION,
+                "side": side,
+                "episode_id": episode["episode_id"],
+                "action_type": action_type,
+                "loss_start_timestamp": start,
+                "old_notional_action_timestamp": old_timestamp,
+                "new_qty_action_timestamp": new_timestamp,
+                "timestamp_difference_minutes": difference,
+                "comparison_status": status,
+            })
+    return pd.DataFrame(rows, columns=columns)
 
 
 def add_forward_returns(
@@ -2060,6 +2330,13 @@ def _chinese_frame(frame: pd.DataFrame) -> pd.DataFrame:
             "REDUCE→ADD": "先减仓→后加仓",
             "NONE": "无明显动作",
         },
+        "comparison_status": {
+            "EXACT_MATCH": "新旧动作时间完全一致",
+            "DISAPPEARED": "旧名义动作在数量口径下消失",
+            "NEW": "数量口径新增动作",
+            "TIMESTAMP_CHANGED": "新旧动作触发时间改变",
+            "NEITHER": "两种口径均未触发",
+        },
         "dataset": {
             "exploratory_historical": "历史探索数据",
             "out_of_sample": "样本外验证数据",
@@ -2157,7 +2434,8 @@ def _build_chinese_report(
         f"- 分析逻辑版本：{summary['analysis_logic_version']}",
         "- 这里的批次是“推断的稳定样本窗口”，不是可追踪账户组成的真实固定名单。",
         "- 币安没有提供可完整跨日追踪的聪明钱账户身份集合，因此系统宁可放弃不确定数据，也不假设名单连续。",
-        "- 旧版 LONG/SHORT_NEW_LOSS_ADD/REDUCE 回测已作废：旧分类使用未来动作，却从亏损开始时计算收益。",
+        "- v1 动作回测已作废：旧分类使用未来动作，却从亏损开始时计算收益。",
+        "- 旧 2.0 动作定义也已作废：直接使用 USDT 名义仓位会受到 BTC 价格机械变化污染。",
         f"- 原始记录数：{summary['raw_records']:,}",
         f"- 有效记录数：{summary['valid_records']:,}",
         f"- 无效记录数：{summary['invalid_records']:,}",
@@ -2168,8 +2446,31 @@ def _build_chinese_report(
         f"- 批次过期状态记录数：{summary['expired_period_records']}",
         f"- 名单刷新次数：{summary['refresh_windows']}",
         f"- 模型冻结时间：{summary['model_freeze_date']}",
+        f"- 2.1 修正版逻辑生效时间：{summary['logic_valid_from']}",
         f"- 样本外事件数：{summary['oos_events']}",
-        "- 冻结时间之前的全部结果只属于历史探索；样本外解释仅适用于修正后事件逻辑部署后的新数据。",
+        "- 只有同时晚于模型冻结时间和修正版逻辑生效时间的数据，才属于当前逻辑的样本外验证。",
+        "",
+        "## 为什么不能直接用USDT仓位金额判断加仓",
+        "",
+        "- USDT 名义仓位同时受到真实风险数量和 BTC 价格影响；即使持有数量完全不变，BTC 上涨也会机械推高名义金额。",
+        "- 动作事件现在使用“USDT 名义仓位 ÷ 当时 BTC 价格”得到 BTC 等价数量代理，再判断是否越过 ±3% 门槛。",
+        "- 该数量只是从聚合名义金额反推的 exposure proxy，不是 Binance 提供的账户级精确合约张数。",
+        "- USDT 名义仓位和名义净流继续保留用于展示，但不再触发加仓、减仓、结构刷新或主要背离信号。",
+        "",
+        "## 批次分段与新旧动作定义对照",
+        "",
+        f"- ACTIVE 后检测到刷新并强制新建批次：{summary['active_refresh_new_segments']} 次",
+        f"- 其中旧 18 小时复用规则本会错误沿用旧编号：{summary['old_rule_active_segment_reuses']} 次",
+        f"- 旧名义 ADD：{summary['old_notional_action_counts'].get('ADD', 0)}；新数量 ADD：{summary['new_qty_action_counts'].get('ADD', 0)}",
+        f"- 旧名义 REDUCE：{summary['old_notional_action_counts'].get('REDUCE', 0)}；新数量 REDUCE：{summary['new_qty_action_counts'].get('REDUCE', 0)}",
+        f"- 完全一致：{summary['action_comparison_counts'].get('EXACT_MATCH', 0)}；消失：{summary['action_comparison_counts'].get('DISAPPEARED', 0)}；新增：{summary['action_comparison_counts'].get('NEW', 0)}；时间改变：{summary['action_comparison_counts'].get('TIMESTAMP_CHANGED', 0)}",
+        *[
+            f"- 时间改变示例：{example['side']} {example['episode_id']} {example['action_type']}；"
+            f"旧名义时间 {example['old_notional_action_timestamp']}；"
+            f"新数量时间 {example['new_qty_action_timestamp']}；"
+            f"相差 {example['timestamp_difference_minutes']:.2f} 分钟"
+            for example in summary["action_timestamp_changed_examples"]
+        ],
         "",
         "## 数据质量",
         "",
@@ -2194,7 +2495,7 @@ def _build_chinese_report(
         "## 历史探索回测（因果事件时点）",
         "",
         "- 新亏损收益从首次进入新亏损的时刻开始。",
-        "- 加仓/减仓收益从第一次越过动作阈值的时刻开始，不再从亏损起点回算。",
+        "- 加仓/减仓由 BTC 等价数量代理第一次越过动作阈值触发，收益从该动作时刻开始。",
         "- 未来目标价格只接受目标时刻之后 15 分钟内的第一条记录。",
         "- 空头事件仍保存比特币原始收益，没有乘以 -1。",
         "",
@@ -2270,6 +2571,9 @@ def run_pipeline(
     events = add_forward_returns(events, processed, config)
     episodes = events[events["event_family"] == "LOSS_EPISODE"].copy()
     actions = events[events["event_family"] == "ACTION_EVENT"].copy()
+    action_comparison = build_action_definition_comparison(
+        episodes, actions, processed, config
+    )
     backtest = build_backtest(events, processed, config)
     refresh_rows = processed[processed["cohort_refresh_detected"]]
     action_counts = (
@@ -2292,21 +2596,48 @@ def run_pipeline(
         high_refresh["cohort_refresh_start"].dt.hour.value_counts().sort_index().to_dict()
         if not high_refresh.empty else {}
     )
+    old_notional_counts = {
+        action_type: int(count)
+        for action_type, count in action_comparison.loc[
+            action_comparison["old_notional_action_timestamp"].notna()
+        ].groupby("action_type").size().items()
+    }
+    new_qty_counts = {
+        action_type: int(count)
+        for action_type, count in action_comparison.loc[
+            action_comparison["new_qty_action_timestamp"].notna()
+        ].groupby("action_type").size().items()
+    }
+    comparison_counts = {
+        str(status): int(count)
+        for status, count in action_comparison["comparison_status"].value_counts().items()
+        if status != "NEITHER"
+    }
+    changed_examples = action_comparison[
+        action_comparison["comparison_status"].eq("TIMESTAMP_CHANGED")
+    ].head(10)
     summary = {
         "analysis_logic_version": ANALYSIS_LOGIC_VERSION,
-        "previous_action_backtest_status": "OBSOLETE_LOOKAHEAD_BIAS",
+        "previous_action_backtest_status": (
+            "OBSOLETE_LOOKAHEAD_BIAS_AND_NOTIONAL_PRICE_CONTAMINATION"
+        ),
         "raw_file": str(raw_path.resolve()),
         "raw_file_unchanged": True,
         "raw_records": len(records),
         "valid_records": int(processed["_quality_signal_ok"].sum()),
         "invalid_records": int((~processed["_quality_signal_ok"]).sum()),
         "model_freeze_date": config["model_freeze_date"],
+        "logic_valid_from": config["logic_valid_from"],
         "cohorts_detected": int(len(cohorts)),
         "high_cohorts": int(confidence_counts.get("HIGH", 0)),
         "medium_cohorts": int(confidence_counts.get("MEDIUM", 0)),
         "low_cohorts": int(confidence_counts.get("LOW", 0)),
         "expired_period_records": int((processed["analysis_state"] == "COHORT_EXPIRED").sum()),
         "refresh_windows": int(len(refresh_rows)),
+        "active_refresh_new_segments": int(processed["active_refresh_new_segment"].sum()),
+        "old_rule_active_segment_reuses": int(
+            processed["old_rule_would_reuse_active_segment"].sum()
+        ),
         "refresh_timestamps": [
             timestamp.isoformat() for timestamp in refresh_rows["timestamp"].head(10)
         ],
@@ -2330,6 +2661,20 @@ def run_pipeline(
             f"{side}_{response}": int(count)
             for (side, response), count in action_counts.items()
         },
+        "old_notional_action_counts": old_notional_counts,
+        "new_qty_action_counts": new_qty_counts,
+        "action_comparison_counts": comparison_counts,
+        "action_timestamp_changed_examples": [
+            {
+                "side": row["side"],
+                "episode_id": row["episode_id"],
+                "action_type": row["action_type"],
+                "old_notional_action_timestamp": row["old_notional_action_timestamp"].isoformat(),
+                "new_qty_action_timestamp": row["new_qty_action_timestamp"].isoformat(),
+                "timestamp_difference_minutes": float(row["timestamp_difference_minutes"]),
+            }
+            for _, row in changed_examples.iterrows()
+        ],
         "oos_events": int(
             events.loc[
                 events["event_family"].isin(["LOSS_EPISODE", "ACTION_EVENT"]),
@@ -2343,12 +2688,15 @@ def run_pipeline(
         "有效记录数": summary["valid_records"],
         "无效记录数": summary["invalid_records"],
         "模型冻结时间": summary["model_freeze_date"],
+        "修正版逻辑生效时间": summary["logic_valid_from"],
         "识别名单批次数": summary["cohorts_detected"],
         "高可信批次数": summary["high_cohorts"],
         "中可信批次数": summary["medium_cohorts"],
         "低可信批次数": summary["low_cohorts"],
         "批次过期记录数": summary["expired_period_records"],
         "名单刷新次数": summary["refresh_windows"],
+        "有效批次后刷新强制新分段数": summary["active_refresh_new_segments"],
+        "旧规则本会复用有效批次编号数": summary["old_rule_active_segment_reuses"],
         "前十个名单刷新时间": summary["refresh_timestamps"],
         "数据质量统计": {
             QUALITY_ZH.get(flag, flag): count
@@ -2365,7 +2713,10 @@ def run_pipeline(
         "原始数据最新时间": summary["source_latest_timestamp"],
         "原始历史文件是否保持不变": True,
         "分析逻辑版本": ANALYSIS_LOGIC_VERSION,
-        "旧动作回测状态": "已作废：动作分类使用了未来信息",
+        "旧动作回测状态": "已作废：前视偏差及USDT名义仓位价格污染",
+        "旧USDT名义动作统计": summary["old_notional_action_counts"],
+        "新BTC等价数量动作统计": summary["new_qty_action_counts"],
+        "新旧动作对照统计": summary["action_comparison_counts"],
     }
     if write_outputs:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -2381,6 +2732,9 @@ def run_pipeline(
         _atomic_parquet(episodes, output_dir / LOSS_EPISODES_PATH.name)
         _atomic_parquet(actions, output_dir / ACTION_EVENTS_PATH.name)
         backtest.to_csv(backtest_path, index=False)
+        action_comparison.to_csv(
+            output_dir / ACTION_COMPARISON_PATH.name, index=False
+        )
         _atomic_parquet(
             _chinese_frame(processed.drop(columns=internal)),
             output_dir / CHINESE_PROCESSED_PATH.name,
@@ -2404,6 +2758,11 @@ def run_pipeline(
             index=False,
             encoding="utf-8-sig",
         )
+        _chinese_frame(action_comparison).to_csv(
+            output_dir / CHINESE_ACTION_COMPARISON_PATH.name,
+            index=False,
+            encoding="utf-8-sig",
+        )
         (output_dir / CHINESE_REPORT_PATH.name).write_text(
             _build_chinese_report(summary, events, backtest),
             encoding="utf-8",
@@ -2416,6 +2775,7 @@ def run_pipeline(
         f"原始记录={summary['raw_records']} 有效记录={summary['valid_records']} "
         f"无效记录={summary['invalid_records']} 名单批次={summary['cohorts_detected']} "
         f"名单刷新={summary['refresh_windows']} "
+        f"ACTIVE后新分段={summary['active_refresh_new_segments']} "
         f"高/中/低可信批次={summary['high_cohorts']}/{summary['medium_cohorts']}/{summary['low_cohorts']} "
         f"多头新亏损事件={summary['new_long_loss_events']} "
         f"空头新亏损事件={summary['new_short_loss_events']} "
@@ -2425,6 +2785,7 @@ def run_pipeline(
     return {
         "processed": processed, "events": events, "episodes": episodes,
         "actions": actions, "cohorts": cohorts, "backtest": backtest,
+        "action_comparison": action_comparison,
         "summary": summary,
     }
 

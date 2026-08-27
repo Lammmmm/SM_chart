@@ -1,6 +1,7 @@
 {
   "中文说明": {
-    "model_freeze_date": "模型冻结时间；此时间之后的新数据才属于样本外验证",
+    "model_freeze_date": "模型冻结时间；此时间之后还需满足修正版逻辑生效时间，才属于真正样本外验证",
+    "logic_valid_from": "当前2.1数量代理与分段逻辑真正生效的时间；样本外边界取它和模型冻结时间中的较晚者",
     "cohort": "推断名单批次识别、稳定观察和基准构建参数；不代表可追踪的固定账户集合",
     "total_trader_change_threshold": "交易者总人数变化达到此比例时，优先判断为名单刷新",
     "side_trader_change_threshold": "多头或空头人数变化达到此比例时，优先判断为名单刷新",
@@ -20,7 +21,6 @@
     "structural_mad_epsilon": "稳健离差为零时用于避免除零的极小值",
     "refresh_prior_tolerance_minutes": "中可信结构突变与历史高可信刷新时间分布允许相差的分钟数",
     "refresh_prior_min_samples": "启用历史刷新时间先验前要求的高可信刷新最少样本数",
-    "min_refresh_separation_hours": "相隔不足此小时数的连续结构跳变合并为同一轮刷新",
     "structural_min_abs_change": "各结构字段除统计异常外还必须达到的最小实际变化幅度，避免微小噪声触发刷新",
     "structural_weights": "结构突变总分中各字段的权重；仓位和盈亏只作辅助确认",
     "loss": "新亏损、加仓、减仓、恢复盈利和冷却期参数",
@@ -28,16 +28,17 @@
     "existing_loss_threshold": "批次开始时收益低于此值，标记为已有亏损",
     "loss_entry_threshold": "批次内收益首次低于此值，触发新亏损事件",
     "recovery_threshold": "方向收益恢复到此值时，判定恢复盈利",
-    "add_threshold": "亏损后仓位增加达到此比例，分类为加仓",
-    "reduce_threshold": "亏损后仓位减少达到此比例，分类为减仓",
+    "add_threshold": "亏损后BTC等价数量代理增加达到此比例，触发首次加仓",
+    "reduce_threshold": "亏损后BTC等价数量代理减少达到此比例，触发首次减仓",
     "cooldown_minutes": "同方向亏损事件结束后的冷却分钟数",
-    "divergence": "比特币价格与批次净风险流背离参数",
+    "divergence": "比特币价格与批次净BTC等价数量风险流背离参数",
     "quality": "数据质量一致性检查参数",
     "backtest": "未来收益周期、自助法抽样次数、随机种子和价格时间容差",
     "max_forward_price_delay_minutes": "目标时刻之后允许使用第一条价格的最大延迟分钟数；超过则该周期收益为空"
   },
   "smart_money_analysis": {
     "model_freeze_date": "2026-08-27T01:42:59Z",
+    "logic_valid_from": "2026-08-27T04:27:07Z",
     "cohort": {
       "total_trader_change_threshold": 0.08,
       "side_trader_change_threshold": 0.12,
@@ -57,15 +58,14 @@
       "structural_mad_epsilon": 1e-9,
       "refresh_prior_tolerance_minutes": 120,
       "refresh_prior_min_samples": 3,
-      "min_refresh_separation_hours": 18,
       "structural_min_abs_change": {
         "total_traders": 0.01,
         "long_traders": 0.015,
         "short_traders": 0.015,
         "long_avg_price": 0.005,
         "short_avg_price": 0.005,
-        "long_pos_usdt": 0.10,
-        "short_pos_usdt": 0.10,
+        "long_qty_proxy": 0.10,
+        "short_qty_proxy": 0.10,
         "long_unrealized_pnl": 0.25,
         "short_unrealized_pnl": 0.25,
         "ls_ratio": 0.05
@@ -76,8 +76,8 @@
         "short_traders": 2.0,
         "long_avg_price": 2.0,
         "short_avg_price": 2.0,
-        "long_pos_usdt": 1.0,
-        "short_pos_usdt": 1.0,
+        "long_qty_proxy": 1.0,
+        "short_qty_proxy": 1.0,
         "long_unrealized_pnl": 0.5,
         "short_unrealized_pnl": 0.5,
         "ls_ratio": 1.0

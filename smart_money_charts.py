@@ -74,9 +74,13 @@ def render_cohort_analysis_section(st: Any, period_label: str) -> None:
     st.divider()
     st.subheader("按推断名单批次划分的聪明钱分析")
     st.caption(
-        "原始多空人数比、仓位和币安盈亏数据仅作描述；资金流、亏损事件和信号全部限制在同一名单批次内。"
+        "USDT 名义仓位继续用于描述；动作、净风险流和主要背离信号使用 BTC 等价数量代理。"
         "这里的批次只是名单刷新后的推断稳定样本窗口，并不代表我们知道具体账户没有变化。"
         "名单刷新期、稳定观察期、基准构建期、低可信批次和过期批次一律不产生研究信号。"
+    )
+    st.caption(
+        "BTC等价仓位由 USDT 名义仓位 / BTC 当前价格近似计算，用于剔除价格本身对美元名义仓位的机械影响；"
+        "它是 quantity proxy，不等于 Binance 提供的账户级精确合约张数。"
     )
     if st.button("重新生成批次、事件和回测", key="rebuild_cohort_analysis"):
         with st.spinner("正在从只读历史数据重建分析结果……"):
@@ -102,8 +106,8 @@ def render_cohort_analysis_section(st: Any, period_label: str) -> None:
     cards[7].metric("样本外事件", summary["oos_events"])
     st.caption(
         f"分析逻辑版本：{summary['analysis_logic_version']}；模型冻结时间："
-        f"{summary['model_freeze_date']}。旧版动作回测已因前视偏差作废；"
-        "修正后逻辑部署后的新数据才可按此版本解释为样本外验证。"
+        f"{summary['model_freeze_date']}；修正版逻辑生效时间：{summary['logic_valid_from']}。"
+        "旧版动作回测已因前视偏差和名义仓位价格污染作废。"
     )
 
     chart = _filter_period(processed[processed["timestamp"].notna()], period_label)
@@ -126,9 +130,9 @@ def render_cohort_analysis_section(st: Any, period_label: str) -> None:
     active = chart[chart["signal_eligible"]]
     flow_figure = go.Figure()
     for column, name, color in [
-        ("long_position_change_pct", "多头仓位变化", "#ef4444"),
-        ("short_position_change_pct", "空头仓位变化", "#10b981"),
-        ("cohort_net_flow", "批次净风险流", "#2563eb"),
+        ("long_qty_change_pct", "多头BTC等价仓位变化", "#ef4444"),
+        ("short_qty_change_pct", "空头BTC等价仓位变化", "#10b981"),
+        ("cohort_net_qty_flow", "聪明钱净BTC等价风险流", "#2563eb"),
     ]:
         flow_figure.add_trace(go.Scatter(
             x=active["timestamp"], y=active[column], name=name,
@@ -137,7 +141,7 @@ def render_cohort_analysis_section(st: Any, period_label: str) -> None:
         ))
     flow_figure.update_yaxes(tickformat=".1%")
     st.plotly_chart(
-        _base_layout(flow_figure, "图表二 · 同一批次内的仓位与净风险流"),
+        _base_layout(flow_figure, "图表二 · 同一批次内的BTC等价仓位与净风险流"),
         width="stretch", key="cohort_flows",
     )
 
@@ -161,18 +165,20 @@ def render_cohort_analysis_section(st: Any, period_label: str) -> None:
                 customdata=points[[
                     "current_price", f"{side}_loss_depth",
                     f"{side}_loss_duration_minutes",
+                    f"{side}_position_qty_change_since_loss",
                     f"{side}_position_change_since_loss",
                     f"{side}_avg_entry_change_since_loss",
-                    "cohort_net_flow", "cohort_confidence",
+                    "cohort_net_qty_flow", "cohort_confidence",
                 ]],
                 hovertemplate=(
                     "时间=%{x}<br>比特币价格=%{customdata[0]:,.2f}"
                     "<br>亏损深度=%{customdata[1]:.2%}"
                     "<br>亏损持续=%{customdata[2]:.0f}分钟"
-                    "<br>仓位变化=%{customdata[3]:.2%}"
-                    "<br>平均开仓价变化=%{customdata[4]:.2%}"
-                    "<br>批次净风险流=%{customdata[5]:.2%}"
-                    "<br>批次可信度=%{customdata[6]}<extra></extra>"
+                    "<br>BTC等价仓位变化=%{customdata[3]:.2%}"
+                    "<br>USDT名义仓位变化=%{customdata[4]:.2%}"
+                    "<br>平均开仓价变化=%{customdata[5]:.2%}"
+                    "<br>BTC等价净风险流=%{customdata[6]:.2%}"
+                    "<br>批次可信度=%{customdata[7]}<extra></extra>"
                 ),
             ))
         recovery = chart[chart[f"{side}_recovery_event"]]

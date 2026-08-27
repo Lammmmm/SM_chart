@@ -113,6 +113,8 @@ def test_hard_trader_jump_detects_refresh():
     assert len(cohorts) == 2
     assert processed.iloc[-1]["hard_refresh_trigger"]
     assert processed.iloc[-1]["cohort_confidence"] == "HIGH"
+    assert processed.iloc[-1]["active_refresh_new_segment"]
+    assert processed.iloc[-1]["cohort_id"] != processed.iloc[-2]["cohort_id"]
 
 
 def test_continuous_refresh_creates_one_new_cohort():
@@ -126,6 +128,22 @@ def test_continuous_refresh_creates_one_new_cohort():
     processed, cohorts, *_ = process(records)
     assert len(cohorts) == 2
     assert processed["cohort_refresh_detected"].sum() == 1
+
+
+def test_active_refresh_within_old_18h_window_starts_new_cohort():
+    records = baseline_records()
+    records.append(record(35, long_traders=150, short_traders=150))
+    records.extend([
+        record(minute, long_traders=150, short_traders=150)
+        for minute in range(40, 100, 5)
+    ])
+    records.append(record(100, long_traders=200, short_traders=200))
+    processed, cohorts, *_ = process(records)
+    assert processed.iloc[-2]["analysis_state"] == "ACTIVE_COHORT"
+    assert processed.iloc[-1]["active_refresh_new_segment"]
+    assert processed.iloc[-1]["old_rule_would_reuse_active_segment"]
+    assert processed.iloc[-1]["cohort_id"] != processed.iloc[-2]["cohort_id"]
+    assert len(cohorts) == 3
 
 
 def test_cross_cohort_delta_is_null():
@@ -211,6 +229,7 @@ def test_future_add_does_not_change_past_rows():
         "cohort_id", "analysis_state", "cohort_confidence",
         "cohort_refresh_detected", "structural_refresh_score",
         "signal_eligible", "baseline_price", "cohort_net_flow",
+        "cohort_net_qty_flow", "long_position_qty_change_since_loss",
         "long_new_loss_event", "long_action_event", "long_action_type",
         "long_action_event_id", "long_loss_response", "event_markers",
     ]
@@ -318,6 +337,10 @@ def test_trader_and_avg_entry_anomalies_trigger_structural_refresh():
     assert processed.iloc[-1]["structural_refresh_trigger"]
     assert processed.iloc[-1]["cohort_confidence"] == "MEDIUM"
     assert len(cohorts) == 2
+    assert processed.iloc[-1]["cohort_id"] != processed.iloc[-2]["cohort_id"]
+    assert not processed.iloc[-1]["signal_eligible"]
+    assert pd.isna(processed.iloc[-1]["long_qty_change_pct"])
+    assert pd.isna(processed.iloc[-1]["cohort_net_qty_flow"])
 
 
 def test_structural_detector_is_prefix_causal():
@@ -337,3 +360,139 @@ def test_structural_detector_is_prefix_causal():
         full_processed.iloc[: len(prefix)][columns].reset_index(drop=True),
         check_dtype=False,
     )
+
+
+def test_price_only_long_notional_increase_does_not_create_add():
+    rows = [
+        record(minute, price=110.0, long_avg=110.0, long_pos=1_100.0)
+        for minute in range(0, 35, 5)
+    ]
+    rows.extend([
+        record(35, price=100.0, long_avg=110.0, long_pos=1_000.0),
+        record(40, price=103.0, long_avg=110.0, long_pos=1_030.0),
+    ])
+    processed, _, _, actions, _ = process(rows)
+    assert np.isclose(processed.iloc[-1]["long_position_change_since_loss"], 0.03)
+    assert abs(processed.iloc[-1]["long_position_qty_change_since_loss"]) < 1e-12
+    assert not (
+        actions["event_type"].eq("LONG_LOSS_ADD").any()
+        if not actions.empty else False
+    )
+
+
+def test_price_only_short_notional_increase_does_not_create_add():
+    rows = [
+        record(minute, price=100.0, short_avg=100.0, short_pos=1_000.0)
+        for minute in range(0, 35, 5)
+    ]
+    rows.extend([
+        record(35, price=103.0, short_avg=100.0, short_pos=1_030.0),
+        record(40, price=107.0, short_avg=100.0, short_pos=1_070.0),
+    ])
+    processed, _, _, actions, _ = process(rows)
+    assert processed.iloc[-1]["short_position_change_since_loss"] > 0.03
+    assert abs(processed.iloc[-1]["short_position_qty_change_since_loss"]) < 1e-12
+    assert not (
+        actions["event_type"].eq("SHORT_LOSS_ADD").any()
+        if not actions.empty else False
+    )
+
+
+def test_real_quantity_increase_creates_add_at_first_crossing():
+    rows = [
+        record(minute, price=110.0, long_avg=110.0, long_pos=1_100.0)
+        for minute in range(0, 35, 5)
+    ]
+    rows.extend([
+        record(35, price=100.0, long_avg=110.0, long_pos=1_000.0),
+        record(40, price=103.0, long_avg=110.0, long_pos=1_061.93),
+    ])
+    _, _, _, actions, _ = process(rows)
+    add = actions[actions["event_type"].eq("LONG_LOSS_ADD")].iloc[0]
+    assert add["action_timestamp"] == BASE + pd.Timedelta(minutes=40)
+    assert np.isclose(add["position_qty_change_since_loss"], 0.031)
+
+
+def test_price_change_does_not_create_quantity_flow():
+    rows = [
+        record(minute, price=100.0, long_pos=1_000.0, short_pos=500.0)
+        for minute in range(0, 35, 5)
+    ]
+    rows.append(record(35, price=110.0, long_pos=1_100.0, short_pos=550.0))
+    processed, *_ = process(rows)
+    latest = processed.iloc[-1]
+    assert latest["cohort_net_notional_flow"] != 0
+    assert abs(latest["cohort_net_qty_flow"]) < 1e-12
+
+
+def test_quantity_baseline_is_median_of_row_ratios():
+    prices = [100.0, 100.0, 100.0, 200.0, 200.0, 200.0, 200.0]
+    positions = [1_000.0, 1_000.0, 4_000.0, 1_000.0, 1_000.0, 4_000.0, 4_000.0]
+    rows = [
+        record(index * 5, price=price, long_pos=position)
+        for index, (price, position) in enumerate(zip(prices, positions))
+    ]
+    processed, *_ = process(rows)
+    latest = processed.iloc[-1]
+    assert np.isclose(latest["baseline_long_qty_proxy"], 10.0)
+    assert not np.isclose(
+        latest["baseline_long_qty_proxy"],
+        latest["baseline_long_pos"] / latest["baseline_price"],
+    )
+
+
+def test_real_quantity_change_creates_expected_quantity_flow():
+    rows = [
+        record(minute, price=100.0, long_pos=1_000.0, short_pos=500.0)
+        for minute in range(0, 35, 5)
+    ]
+    rows.append(record(35, price=100.0, long_pos=1_100.0, short_pos=500.0))
+    processed, *_ = process(rows)
+    assert np.isclose(processed.iloc[-1]["cohort_net_qty_flow"], 1 / 15)
+
+
+def test_low_structural_refresh_after_active_starts_low_cohort():
+    cfg = structural_config()
+    cfg["cohort"]["refresh_prior_min_samples"] = 3
+    rows = structural_history()
+    rows.append(record(40, long_traders=51, short_traders=51, long_avg=110, short_avg=92))
+    processed, cohorts, *_ = process(rows, cfg)
+    assert len(cohorts) == 2
+    assert processed.iloc[-1]["cohort_confidence"] == "LOW"
+    assert processed.iloc[-1]["cohort_id"] != processed.iloc[-2]["cohort_id"]
+    assert not processed.iloc[-1]["signal_eligible"]
+
+
+def test_divergence_never_uses_previous_cohort():
+    cfg = config()
+    frame = pd.DataFrame([
+        {
+            "timestamp": BASE,
+            "cohort_id": "cohort_a",
+            "signal_eligible": True,
+            "current_price": 100.0,
+            "cohort_net_notional_flow": 0.0,
+            "cohort_net_qty_flow": 0.0,
+        },
+        {
+            "timestamp": BASE + pd.Timedelta(hours=4),
+            "cohort_id": "cohort_b",
+            "signal_eligible": True,
+            "current_price": 100.0,
+            "cohort_net_notional_flow": 0.2,
+            "cohort_net_qty_flow": 0.2,
+        },
+    ])
+    result = add_divergence_features(frame, cfg)
+    assert pd.isna(result.iloc[-1]["cohort_net_qty_flow_change_4h"])
+    assert result.iloc[-1]["divergence_4h"] is None
+
+
+def test_out_of_sample_waits_for_logic_valid_from():
+    cfg = config()
+    cfg["model_freeze_date"] = (BASE + pd.Timedelta(minutes=10)).isoformat()
+    cfg["logic_valid_from"] = (BASE + pd.Timedelta(minutes=40)).isoformat()
+    rows = baseline_records() + [record(35), record(40), record(45)]
+    processed, *_ = process(rows, cfg)
+    assert not processed.loc[processed["timestamp"].eq(BASE + pd.Timedelta(minutes=35)), "out_of_sample"].iloc[0]
+    assert processed.loc[processed["timestamp"].eq(BASE + pd.Timedelta(minutes=40)), "out_of_sample"].iloc[0]
