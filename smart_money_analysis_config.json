@@ -1,0 +1,60 @@
+{
+  "中文说明": {
+    "model_freeze_date": "模型冻结时间；此时间之后的新数据才属于样本外验证",
+    "cohort": "名单批次识别、稳定观察和基准构建参数",
+    "total_trader_change_threshold": "交易者总人数变化达到此比例时，优先判断为名单刷新",
+    "side_trader_change_threshold": "多头或空头人数变化达到此比例时，优先判断为名单刷新",
+    "position_change_confirmation": "仓位变化达到此比例时，提高名单刷新可信度，但不能单独触发刷新",
+    "stabilization_minutes": "名单刷新后至少连续稳定观察的分钟数",
+    "stable_total_trader_change": "稳定期允许的交易者总人数最大变化比例",
+    "stable_side_trader_change": "稳定期允许的单边交易者人数最大变化比例",
+    "baseline_minutes": "稳定后用于计算中位数基准的分钟数",
+    "loss": "新亏损、加仓、减仓、恢复盈利和冷却期参数",
+    "clean_baseline_threshold": "批次基准收益不低于此值，才有资格进入新亏损研究",
+    "existing_loss_threshold": "批次开始时收益低于此值，标记为已有亏损",
+    "loss_entry_threshold": "批次内收益首次低于此值，触发新亏损事件",
+    "recovery_threshold": "方向收益恢复到此值时，判定恢复盈利",
+    "add_threshold": "亏损后仓位增加达到此比例，分类为加仓",
+    "reduce_threshold": "亏损后仓位减少达到此比例，分类为减仓",
+    "cooldown_minutes": "同方向亏损事件结束后的冷却分钟数",
+    "divergence": "比特币价格与批次净风险流背离参数",
+    "quality": "数据质量一致性检查参数",
+    "backtest": "未来收益周期、自助法抽样次数和随机种子"
+  },
+  "smart_money_analysis": {
+    "model_freeze_date": "2026-08-27T01:42:59Z",
+    "cohort": {
+      "total_trader_change_threshold": 0.08,
+      "side_trader_change_threshold": 0.12,
+      "position_change_confirmation": 0.25,
+      "stabilization_minutes": 30,
+      "stable_total_trader_change": 0.02,
+      "stable_side_trader_change": 0.03,
+      "baseline_minutes": 30
+    },
+    "loss": {
+      "clean_baseline_threshold": -0.002,
+      "existing_loss_threshold": -0.005,
+      "loss_entry_threshold": -0.005,
+      "recovery_threshold": 0.0,
+      "add_threshold": 0.03,
+      "reduce_threshold": -0.03,
+      "cooldown_minutes": 60,
+      "depth_bucket_edges": [0.005, 0.01, 0.02, 0.03, 0.05]
+    },
+    "divergence": {
+      "windows_hours": [1, 2, 4, 6],
+      "flat_price_threshold": 0.01,
+      "flow_threshold": 0.05
+    },
+    "quality": {
+      "position_total_tolerance": 0.02,
+      "trader_total_tolerance": 1.0
+    },
+    "backtest": {
+      "forward_hours": [1, 4, 12, 24],
+      "bootstrap_samples": 2000,
+      "random_seed": 20260827
+    }
+  }
+}

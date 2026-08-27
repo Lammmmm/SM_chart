@@ -13,9 +13,8 @@ import plotly.graph_objects as go
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
-from market_structure32 import add_structure32_columns, render_structure32_section
 from plotly.subplots import make_subplots
-from structure32_case_explorer import render_structure32_case_explorer
+from smart_money_charts import render_cohort_analysis_section
 
 
 CONFIG_PATH = "config.json"
@@ -704,7 +703,7 @@ def render_linked_time_axis_script(expected_chart_count: int) -> None:
 
 def render_dashboard() -> None:
     st.set_page_config(
-        page_title="Smart Money 宏观网格监控板",
+        page_title="聪明钱宏观网格监控板",
         page_icon="📈",
         layout="wide",
         initial_sidebar_state="expanded",
@@ -720,7 +719,7 @@ def render_dashboard() -> None:
         unsafe_allow_html=True,
     )
 
-    st.title("📈 Smart Money 宏观网格监控板")
+    st.title("📈 聪明钱宏观网格监控板")
     st.markdown("基于本地 JSON 缓存的指标与 BTC 价格交叉分析")
 
     controller = get_sync_controller()
@@ -849,6 +848,9 @@ def render_dashboard() -> None:
     st.caption(
         f"性能优化已启用：8 张小图当前只渲染 {selected_period} 周期窗口数据，范围为 {chart_x_min:%Y-%m-%d %H:%M:%S} 至 {chart_x_max:%Y-%m-%d %H:%M:%S}。"
     )
+    st.info(
+        "以下 8 张原始指标图仅作描述。跨名单批次的仓位、人数或多空人数比跳变不得解释为真实资金流。"
+    )
 
     columns = st.columns(4)
     rendered_chart_count = 0
@@ -886,22 +888,7 @@ def render_dashboard() -> None:
 
     render_linked_time_axis_script(rendered_chart_count)
 
-    structure32_df = add_structure32_columns(df, {})
-
-    # 新增的活动框：放在 8 个小图表之后，32 结构大图标题之前。
-    render_structure32_case_explorer(st, structure32_df)
-
-    st.subheader("32种盘口结构提示图")
-    st.caption(
-        "保留原始 32 结构作为盘口观察层；图上默认高亮的是经过趋势、冲突、确认、冷却过滤后的最终交易提示。"
-        "原始结构点可在图例中手动打开查看。"
-    )
-    render_structure32_section(
-        st,
-        structure32_df,
-        st.plotly_chart,
-        chart_key="smart_money_structure32_chart",
-    )
+    render_cohort_analysis_section(st, selected_period)
 
 
 render_dashboard()
