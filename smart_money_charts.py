@@ -15,6 +15,12 @@ from smart_money_analysis import (
 )
 
 EVENT_TYPE_ZH = {
+    "LONG_NEW_LOSS": "多头首次进入新亏损",
+    "SHORT_NEW_LOSS": "空头首次进入新亏损",
+    "LONG_LOSS_ADD": "多头亏损后首次明显加仓",
+    "LONG_LOSS_REDUCE": "多头亏损后首次明显减仓",
+    "SHORT_LOSS_ADD": "空头亏损后首次明显加仓",
+    "SHORT_LOSS_REDUCE": "空头亏损后首次明显减仓",
     "LONG_NEW_LOSS_ADD": "多头新亏损后加仓",
     "LONG_NEW_LOSS_HOLD": "多头新亏损后持仓",
     "LONG_NEW_LOSS_REDUCE": "多头新亏损后减仓",
@@ -32,9 +38,12 @@ def _read_derived() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     summary = json.loads(SUMMARY_PATH.read_text(encoding="utf-8"))
     processed["timestamp"] = pd.to_datetime(processed["timestamp"], utc=True)
     if not events.empty:
-        events["loss_start_timestamp"] = pd.to_datetime(
-            events["loss_start_timestamp"], utc=True
-        )
+        for column in [
+            "event_timestamp", "loss_start_timestamp", "action_timestamp",
+            "recovery_timestamp",
+        ]:
+            if column in events:
+                events[column] = pd.to_datetime(events[column], utc=True)
     return processed, events, summary
 
 
@@ -63,10 +72,11 @@ def _base_layout(figure: go.Figure, title: str) -> go.Figure:
 
 def render_cohort_analysis_section(st: Any, period_label: str) -> None:
     st.divider()
-    st.subheader("按名单批次划分的聪明钱分析")
+    st.subheader("按推断名单批次划分的聪明钱分析")
     st.caption(
         "原始多空人数比、仓位和币安盈亏数据仅作描述；资金流、亏损事件和信号全部限制在同一名单批次内。"
-        "名单刷新期、稳定观察期和基准构建期一律不产生交易信号。"
+        "这里的批次只是名单刷新后的推断稳定样本窗口，并不代表我们知道具体账户没有变化。"
+        "名单刷新期、稳定观察期、基准构建期、低可信批次和过期批次一律不产生研究信号。"
     )
     if st.button("重新生成批次、事件和回测", key="rebuild_cohort_analysis"):
         with st.spinner("正在从只读历史数据重建分析结果……"):
@@ -81,16 +91,19 @@ def render_cohort_analysis_section(st: Any, period_label: str) -> None:
         st.warning(f"读取分析结果失败：{exc}")
         return
 
-    cards = st.columns(6)
+    cards = st.columns(8)
     cards[0].metric("识别批次数", summary["cohorts_detected"])
-    cards[1].metric("名单刷新次数", summary["refresh_windows"])
-    cards[2].metric("无效记录", summary["invalid_records"])
-    cards[3].metric("多头新亏损", summary["new_long_loss_events"])
-    cards[4].metric("空头新亏损", summary["new_short_loss_events"])
-    cards[5].metric("样本外事件", summary["oos_events"])
+    cards[1].metric("高可信批次", summary["high_cohorts"])
+    cards[2].metric("中可信批次", summary["medium_cohorts"])
+    cards[3].metric("低可信批次", summary["low_cohorts"])
+    cards[4].metric("多头新亏损", summary["new_long_loss_events"])
+    cards[5].metric("空头新亏损", summary["new_short_loss_events"])
+    cards[6].metric("首次动作事件", sum(summary["action_counts"].values()))
+    cards[7].metric("样本外事件", summary["oos_events"])
     st.caption(
-        f"模型冻结时间：{summary['model_freeze_date']}；此前结果均为历史探索结果，"
-        "只有此时间之后新采集的数据才属于真正的样本外验证。"
+        f"分析逻辑版本：{summary['analysis_logic_version']}；模型冻结时间："
+        f"{summary['model_freeze_date']}。旧版动作回测已因前视偏差作废；"
+        "修正后逻辑部署后的新数据才可按此版本解释为样本外验证。"
     )
 
     chart = _filter_period(processed[processed["timestamp"].notna()], period_label)
@@ -136,13 +149,31 @@ def render_cohort_analysis_section(st: Any, period_label: str) -> None:
             line=dict(color=color, width=1.4),
         ))
         for response, symbol in [("ADD", "triangle-up"), ("REDUCE", "triangle-down")]:
-            points = chart[chart[f"{side}_loss_response"] == response].drop_duplicates(
-                [f"{side}_loss_event_id", f"{side}_loss_response"]
-            )
+            points = chart[
+                chart[f"{side}_action_event"]
+                & chart[f"{side}_action_type"].eq(response)
+            ]
             loss_figure.add_trace(go.Scatter(
                 x=points["timestamp"], y=points[f"{side}_directional_return"],
-                name=f"{SIDE_ZH[side]}{RESPONSE_ZH[response]}", mode="markers",
+                name=f"{SIDE_ZH[side]}亏损后首次明显{RESPONSE_ZH[response]}",
+                mode="markers",
                 marker=dict(symbol=symbol, size=9, color=color),
+                customdata=points[[
+                    "current_price", f"{side}_loss_depth",
+                    f"{side}_loss_duration_minutes",
+                    f"{side}_position_change_since_loss",
+                    f"{side}_avg_entry_change_since_loss",
+                    "cohort_net_flow", "cohort_confidence",
+                ]],
+                hovertemplate=(
+                    "时间=%{x}<br>比特币价格=%{customdata[0]:,.2f}"
+                    "<br>亏损深度=%{customdata[1]:.2%}"
+                    "<br>亏损持续=%{customdata[2]:.0f}分钟"
+                    "<br>仓位变化=%{customdata[3]:.2%}"
+                    "<br>平均开仓价变化=%{customdata[4]:.2%}"
+                    "<br>批次净风险流=%{customdata[5]:.2%}"
+                    "<br>批次可信度=%{customdata[6]}<extra></extra>"
+                ),
             ))
         recovery = chart[chart[f"{side}_recovery_event"]]
         loss_figure.add_trace(go.Scatter(
@@ -161,14 +192,17 @@ def render_cohort_analysis_section(st: Any, period_label: str) -> None:
     if events.empty:
         st.info("当前阈值下尚无新亏损事件。")
         return
-    event_types = sorted(events["event_type"].dropna().unique())
+    research_events = events[
+        events["event_family"].isin(["LOSS_EPISODE", "ACTION_EVENT"])
+    ]
+    event_types = sorted(research_events["event_type"].dropna().unique())
     selected = st.selectbox(
         "事件研究类型",
         event_types,
         format_func=lambda value: EVENT_TYPE_ZH.get(value, value),
         key="cohort_event_study_type",
     )
-    study = events[events["event_type"] == selected]
+    study = research_events[research_events["event_type"] == selected]
     horizons = [0, 1, 4, 12, 24]
     mean_values = [0.0] + [
         study[f"forward_return_{hours}h"].mean() for hours in horizons[1:]

@@ -27,6 +27,11 @@ CHINESE_EVENTS_PATH = DERIVED_DIR / "聪明钱事件表_中文.parquet"
 CHINESE_COHORTS_PATH = DERIVED_DIR / "聪明钱批次表_中文.parquet"
 CHINESE_BACKTEST_PATH = DERIVED_DIR / "聪明钱回测结果_中文.csv"
 CHINESE_REPORT_PATH = DERIVED_DIR / "聪明钱分析报告_中文.md"
+LOSS_EPISODES_PATH = DERIVED_DIR / "smart_money_loss_episodes.parquet"
+ACTION_EVENTS_PATH = DERIVED_DIR / "smart_money_action_events.parquet"
+CHINESE_LOSS_EPISODES_PATH = DERIVED_DIR / "聪明钱亏损过程表_中文.parquet"
+CHINESE_ACTION_EVENTS_PATH = DERIVED_DIR / "聪明钱动作事件表_中文.parquet"
+ANALYSIS_LOGIC_VERSION = "2.0"
 
 STATE_ZH = {
     "UNAVAILABLE": "不可用",
@@ -34,10 +39,17 @@ STATE_ZH = {
     "STABILIZING": "稳定观察期",
     "BASELINE_BUILDING": "基准构建期",
     "ACTIVE_COHORT": "批次有效期",
+    "COHORT_EXPIRED": "批次已过期",
 }
 SIDE_ZH = {"LONG": "多头", "SHORT": "空头"}
 RESPONSE_ZH = {"ADD": "加仓", "HOLD": "持仓", "REDUCE": "减仓"}
 EVENT_TYPE_ZH = {
+    "LONG_NEW_LOSS": "多头首次进入新亏损",
+    "SHORT_NEW_LOSS": "空头首次进入新亏损",
+    "LONG_LOSS_ADD": "多头亏损后首次明显加仓",
+    "LONG_LOSS_REDUCE": "多头亏损后首次明显减仓",
+    "SHORT_LOSS_ADD": "空头亏损后首次明显加仓",
+    "SHORT_LOSS_REDUCE": "空头亏损后首次明显减仓",
     "LONG_NEW_LOSS_ADD": "多头新亏损后加仓",
     "LONG_NEW_LOSS_HOLD": "多头新亏损后持仓",
     "LONG_NEW_LOSS_REDUCE": "多头新亏损后减仓",
@@ -63,6 +75,9 @@ STATUS_ZH = {
     "OPEN": "进行中",
     "RECOVERED": "已恢复盈利",
     "COHORT_REFRESH": "因名单刷新而结束",
+    "COHORT_CHANGED": "因推断批次变化而结束",
+    "COHORT_EXPIRED": "因推断批次过期而结束",
+    "DATA_END": "数据结束",
 }
 
 COLUMN_ZH = {
@@ -79,6 +94,19 @@ COLUMN_ZH = {
     "data_quality_flag": "数据质量标记", "cohort_id": "名单批次编号",
     "analysis_state": "分析状态", "cohort_refresh_detected": "是否检测到名单刷新",
     "cohort_refresh_score": "名单刷新评分", "is_refresh_window": "是否处于名单刷新期",
+    "hard_refresh_trigger": "是否触发人数硬刷新",
+    "structural_refresh_trigger": "是否触发结构刷新",
+    "structural_refresh_score": "结构刷新评分",
+    "structural_anomalous_fields": "结构异常字段",
+    "structural_anomalous_field_count": "结构异常字段数",
+    "refresh_time_prior_supported": "历史刷新时间分布是否支持",
+    "cohort_confidence": "推断批次可信度",
+    "cohort_definition": "批次定义", "refresh_reason": "刷新原因",
+    "expired_records": "过期状态记录数", "expired_at": "批次过期时间",
+    "data_gap_detected": "是否检测到长时间数据中断",
+    "cohort_expired_now": "是否在此刻过期",
+    "backtest_primary": "是否进入主要回测",
+    "analysis_logic_version": "分析逻辑版本",
     "is_stabilization_window": "是否处于稳定观察期",
     "minutes_since_cohort_start": "批次开始后分钟数",
     "cohort_refresh_start": "名单刷新开始时间", "cohort_refresh_end": "名单刷新结束时间",
@@ -127,6 +155,20 @@ COLUMN_ZH = {
     "short_avg_entry_change_since_loss": "空头亏损后平均开仓价变化",
     "long_loss_response": "多头亏损后操作", "short_loss_response": "空头亏损后操作",
     "event_markers": "事件标记", "event_id": "事件编号", "side": "方向",
+    "event_family": "事件类别", "event_timestamp": "事件发生时间",
+    "event_price": "事件发生价格", "episode_id": "亏损过程编号",
+    "action_event_id": "动作事件编号", "action_type": "动作类型",
+    "action_timestamp": "动作发生时间", "action_price": "动作发生价格",
+    "action_position": "动作发生时仓位", "action_avg_entry": "动作发生时平均开仓价",
+    "position_change_since_loss": "亏损后仓位变化率",
+    "loss_depth_at_action": "动作发生时亏损深度",
+    "loss_duration_at_action": "动作发生时亏损分钟数",
+    "cohort_net_flow_at_action": "动作发生时批次净风险流",
+    "net_exposure_at_action": "动作发生时净风险敞口",
+    "avg_entry_change_since_loss": "亏损后平均开仓价变化",
+    "action_sequence": "动作顺序", "recovery_timestamp": "恢复盈利时间",
+    "recovery_price": "恢复盈利价格", "episode_end_timestamp": "亏损过程结束时间",
+    "episode_end_reason": "亏损过程结束原因",
     "event_type": "事件类型", "loss_start_timestamp": "亏损开始时间",
     "loss_end_timestamp": "亏损结束时间", "loss_start_price": "亏损开始价格",
     "loss_end_price": "亏损结束价格", "loss_start_position": "亏损开始仓位",
@@ -151,12 +193,27 @@ COLUMN_ZH = {
     "win_rate": "正收益比例", "p25": "第25百分位", "p75": "第75百分位",
     "bootstrap_ci_low": "自助法95%置信区间下限",
     "bootstrap_ci_high": "自助法95%置信区间上限",
+    "sensitivity": "批次可信度口径", "unconditional_return": "无条件基准收益",
+    "difference_vs_unconditional": "相对无条件基准的超额收益",
+    "directional_success_rate": "方向正确比例", "sample_size_warning": "样本量提示",
+    "final_response_note": "最终操作说明",
 }
 for _hours in (1, 2, 4, 6, 12, 24):
     COLUMN_ZH[f"btc_return_{_hours}h"] = f"比特币过去{_hours}小时收益"
     COLUMN_ZH[f"cohort_net_flow_change_{_hours}h"] = f"批次净风险流过去{_hours}小时变化"
     COLUMN_ZH[f"divergence_{_hours}h"] = f"过去{_hours}小时价格资金流背离"
     COLUMN_ZH[f"forward_return_{_hours}h"] = f"事件后{_hours}小时比特币收益"
+    COLUMN_ZH[f"forward_price_timestamp_{_hours}h"] = f"事件后{_hours}小时价格采样时间"
+    COLUMN_ZH[f"forward_price_delay_minutes_{_hours}h"] = f"事件后{_hours}小时价格延迟分钟数"
+for _prefix, _action_name in (("first_add", "首次加仓"), ("first_reduce", "首次减仓")):
+    COLUMN_ZH[f"{_prefix}_timestamp"] = f"{_action_name}时间"
+    COLUMN_ZH[f"{_prefix}_price"] = f"{_action_name}时比特币价格"
+    COLUMN_ZH[f"{_prefix}_position"] = f"{_action_name}时仓位"
+    COLUMN_ZH[f"{_prefix}_avg_entry"] = f"{_action_name}时平均开仓价"
+    COLUMN_ZH[f"{_prefix}_loss_depth"] = f"{_action_name}时亏损深度"
+    COLUMN_ZH[f"{_prefix}_loss_duration"] = f"{_action_name}时亏损分钟数"
+    COLUMN_ZH[f"{_prefix}_net_exposure"] = f"{_action_name}时净风险敞口"
+    COLUMN_ZH[f"{_prefix}_cohort_net_flow"] = f"{_action_name}时批次净风险流"
 
 NUMERIC_COLUMNS = [
     "current_price", "funding_rate", "long_avg_price", "short_avg_price",
@@ -178,6 +235,42 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "stable_total_trader_change": 0.02,
         "stable_side_trader_change": 0.03,
         "baseline_minutes": 30,
+        "max_cohort_age_hours": 26,
+        "max_data_gap_minutes": 120,
+        "initial_cohort_confidence": "LOW",
+        "structural_window_hours": 24,
+        "structural_min_history": 24,
+        "structural_z_threshold": 6.0,
+        "structural_score_threshold": 6.0,
+        "structural_min_anomalous_fields": 3,
+        "structural_mad_epsilon": 1e-9,
+        "refresh_prior_tolerance_minutes": 120,
+        "refresh_prior_min_samples": 3,
+        "min_refresh_separation_hours": 18,
+        "structural_min_abs_change": {
+            "total_traders": 0.01,
+            "long_traders": 0.015,
+            "short_traders": 0.015,
+            "long_avg_price": 0.005,
+            "short_avg_price": 0.005,
+            "long_pos_usdt": 0.10,
+            "short_pos_usdt": 0.10,
+            "long_unrealized_pnl": 0.25,
+            "short_unrealized_pnl": 0.25,
+            "ls_ratio": 0.05,
+        },
+        "structural_weights": {
+            "total_traders": 3.0,
+            "long_traders": 2.0,
+            "short_traders": 2.0,
+            "long_avg_price": 2.0,
+            "short_avg_price": 2.0,
+            "long_pos_usdt": 1.0,
+            "short_pos_usdt": 1.0,
+            "long_unrealized_pnl": 0.5,
+            "short_unrealized_pnl": 0.5,
+            "ls_ratio": 1.0,
+        },
     },
     "loss": {
         "clean_baseline_threshold": -0.002,
@@ -202,6 +295,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "forward_hours": [1, 4, 12, 24],
         "bootstrap_samples": 2000,
         "random_seed": 20260827,
+        "max_forward_price_delay_minutes": 15,
     },
 }
 
@@ -376,7 +470,7 @@ def _blank_features() -> dict[str, Any]:
     return result
 
 
-def reconstruct_cohorts(raw_frame: pd.DataFrame, config: dict[str, Any]) -> tuple[pd.DataFrame, pd.DataFrame]:
+def _obsolete_v1_reconstruct_cohorts(raw_frame: pd.DataFrame, config: dict[str, Any]) -> tuple[pd.DataFrame, pd.DataFrame]:
     if raw_frame.empty:
         return raw_frame.copy(), pd.DataFrame()
     cfg = config["cohort"]
@@ -648,7 +742,7 @@ def _position_bucket(change: float) -> str | None:
     return "add >20%"
 
 
-def build_loss_events(processed: pd.DataFrame, config: dict[str, Any]) -> tuple[pd.DataFrame, pd.DataFrame]:
+def _obsolete_v1_build_loss_events(processed: pd.DataFrame, config: dict[str, Any]) -> tuple[pd.DataFrame, pd.DataFrame]:
     result = processed.copy()
     cfg = config["loss"]
     for side in ("long", "short"):
@@ -805,7 +899,7 @@ def build_loss_events(processed: pd.DataFrame, config: dict[str, Any]) -> tuple[
     return result, pd.DataFrame(completed)
 
 
-def add_forward_returns(
+def _obsolete_v1_add_forward_returns(
     events: pd.DataFrame, processed: pd.DataFrame, config: dict[str, Any]
 ) -> pd.DataFrame:
     result = events.copy()
@@ -845,7 +939,7 @@ def _bootstrap_mean_ci(
     return float(np.quantile(draws, 0.025)), float(np.quantile(draws, 0.975))
 
 
-def build_backtest(events: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame:
+def _obsolete_v1_build_backtest(events: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame:
     columns = [
         "dataset", "event_type", "segment", "segment_value", "horizon", "sample_count",
         "mean_forward_return", "median_forward_return", "win_rate", "p25", "p75",
@@ -885,6 +979,1007 @@ def build_backtest(events: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame
                         "p25": float(np.quantile(values, 0.25)) if len(values) else math.nan,
                         "p75": float(np.quantile(values, 0.75)) if len(values) else math.nan,
                         "bootstrap_ci_low": low, "bootstrap_ci_high": high,
+                    })
+    return pd.DataFrame(rows, columns=columns)
+
+
+STRUCTURAL_FIELDS = (
+    "total_traders", "long_traders", "short_traders",
+    "long_avg_price", "short_avg_price", "long_pos_usdt", "short_pos_usdt",
+    "long_unrealized_pnl", "short_unrealized_pnl", "ls_ratio",
+)
+STRUCTURAL_PRIMARY_FIELDS = {
+    "total_traders", "long_traders", "short_traders",
+    "long_avg_price", "short_avg_price",
+}
+STRUCTURAL_TRADER_FIELDS = {"total_traders", "long_traders", "short_traders"}
+
+
+def _signed_relative_change(current: Any, previous: Any) -> float:
+    if pd.isna(current) or pd.isna(previous):
+        return math.nan
+    denominator = max(abs(float(previous)), 1e-12)
+    return (float(current) - float(previous)) / denominator
+
+
+def _causal_robust_z(
+    current_delta: float,
+    history: list[tuple[pd.Timestamp, float]],
+    timestamp: pd.Timestamp,
+    config: dict[str, Any],
+) -> float:
+    if pd.isna(current_delta):
+        return math.nan
+    window_start = timestamp - pd.Timedelta(hours=config["structural_window_hours"])
+    past = [
+        value for past_timestamp, value in history
+        if window_start <= past_timestamp < timestamp and not pd.isna(value)
+    ]
+    if len(past) < int(config["structural_min_history"]):
+        return math.nan
+    median = float(np.median(past))
+    mad = float(np.median(np.abs(np.asarray(past) - median)))
+    scale = 1.4826 * mad + float(config["structural_mad_epsilon"])
+    return abs(float(current_delta) - median) / scale
+
+
+def _time_prior_supported(
+    timestamp: pd.Timestamp,
+    high_refresh_minutes: list[int],
+    config: dict[str, Any],
+) -> bool:
+    minimum = int(config["refresh_prior_min_samples"])
+    if minimum == 0:
+        return True
+    if len(high_refresh_minutes) < minimum:
+        return False
+    minute = timestamp.hour * 60 + timestamp.minute
+    tolerance = float(config["refresh_prior_tolerance_minutes"])
+    return any(
+        min(abs(minute - historical), 1440 - abs(minute - historical)) <= tolerance
+        for historical in high_refresh_minutes
+    )
+
+
+def _v2_blank_features(config: dict[str, Any]) -> dict[str, Any]:
+    result = _blank_features()
+    result.update({
+        "analysis_logic_version": ANALYSIS_LOGIC_VERSION,
+        "hard_refresh_trigger": False,
+        "structural_refresh_trigger": False,
+        "structural_refresh_score": 0.0,
+        "structural_anomalous_fields": "",
+        "structural_anomalous_field_count": 0,
+        "refresh_time_prior_supported": False,
+        "cohort_confidence": "LOW",
+        "backtest_primary": False,
+        "data_gap_detected": False,
+        "cohort_expired_now": False,
+    })
+    for field in config["cohort"]["structural_weights"]:
+        result[f"structural_z_{field}"] = math.nan
+    return result
+
+
+def reconstruct_cohorts(
+    raw_frame: pd.DataFrame, config: dict[str, Any]
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Causally reconstruct inferred stable sample windows, never account-level cohorts."""
+    if raw_frame.empty:
+        return raw_frame.copy(), pd.DataFrame()
+    cfg = config["cohort"]
+    freeze = pd.to_datetime(config["model_freeze_date"], utc=True)
+    feature_rows: list[dict[str, Any]] = []
+    cohort_rows: list[dict[str, Any]] = []
+    delta_history: dict[str, list[tuple[pd.Timestamp, float]]] = {
+        field: [] for field in cfg["structural_weights"]
+    }
+    high_refresh_minutes: list[int] = []
+    last_refresh_timestamp: pd.Timestamp | None = None
+    state = "UNAVAILABLE"
+    cohort_id: str | None = None
+    confidence = str(cfg["initial_cohort_confidence"]).upper()
+    sequence = 0
+    cohort_start = refresh_start = refresh_end = stable_at = stable_run_start = None
+    baseline_start = baseline_end = None
+    baseline_rows: list[dict[str, Any]] = []
+    baseline: dict[str, float] | None = None
+    prior_detector: pd.Series | None = None
+    prior_detector_time: pd.Timestamp | None = None
+    prior_timestamp: pd.Timestamp | None = None
+    cohort_summary: dict[str, Any] | None = None
+
+    def start_cohort(
+        timestamp: pd.Timestamp,
+        *,
+        detected: bool,
+        new_confidence: str,
+        score: float,
+        reason: str,
+        initial_state: str | None = None,
+    ) -> None:
+        nonlocal state, cohort_id, confidence, sequence, cohort_start
+        nonlocal refresh_start, refresh_end, stable_at, stable_run_start
+        nonlocal baseline_start, baseline_end, baseline_rows, baseline, cohort_summary
+        if cohort_summary is not None:
+            cohort_summary["cohort_end"] = prior_timestamp
+            cohort_summary["final_state"] = state
+            cohort_rows.append(cohort_summary)
+        sequence += 1
+        cohort_id = f"cohort_{timestamp:%Y%m%d}_{sequence:03d}"
+        confidence = new_confidence
+        cohort_start = timestamp
+        refresh_start = timestamp if detected else None
+        refresh_end = stable_at = stable_run_start = baseline_end = None
+        baseline_start = timestamp if not detected and initial_state != "UNAVAILABLE" else None
+        baseline_rows, baseline = [], None
+        state = initial_state or ("REFRESHING" if detected else "BASELINE_BUILDING")
+        cohort_summary = {
+            "analysis_logic_version": ANALYSIS_LOGIC_VERSION,
+            "cohort_id": cohort_id,
+            "cohort_definition": "INFERRED_STABLE_SAMPLE_WINDOW",
+            "cohort_confidence": confidence,
+            "cohort_start": timestamp,
+            "cohort_end": pd.NaT,
+            "cohort_refresh_start": refresh_start,
+            "cohort_refresh_end": pd.NaT,
+            "cohort_stable_at": pd.NaT,
+            "cohort_baseline_start": baseline_start,
+            "cohort_baseline_end": pd.NaT,
+            "active_at": pd.NaT,
+            "refresh_reason": reason,
+            "refresh_score": score,
+            "record_count": 0,
+            "signal_eligible_records": 0,
+            "expired_records": 0,
+            "out_of_sample": bool(timestamp >= freeze),
+            "final_state": state,
+        }
+
+    def reset_refresh_in_place(
+        timestamp: pd.Timestamp,
+        *,
+        new_confidence: str,
+        score: float,
+        reason: str,
+    ) -> bool:
+        """Merge staged jumps into one refresh episode while rebuilding its baseline."""
+        nonlocal state, confidence, refresh_start, refresh_end, stable_at, stable_run_start
+        nonlocal baseline_start, baseline_end, baseline_rows, baseline, cohort_summary
+        confidence_rank = {"LOW": 0, "MEDIUM": 1, "HIGH": 2}
+        upgraded_to_high = (
+            confidence != "HIGH" and confidence_rank[new_confidence] >= confidence_rank["HIGH"]
+        )
+        if confidence_rank[new_confidence] > confidence_rank[confidence]:
+            confidence = new_confidence
+        state = "REFRESHING"
+        refresh_start = refresh_start or timestamp
+        refresh_end = stable_at = stable_run_start = baseline_start = baseline_end = None
+        baseline_rows, baseline = [], None
+        if cohort_summary is not None:
+            cohort_summary.update({
+                "cohort_confidence": confidence,
+                "refresh_reason": reason,
+                "refresh_score": max(float(cohort_summary["refresh_score"]), float(score)),
+                "cohort_refresh_start": refresh_start,
+                "cohort_refresh_end": pd.NaT,
+                "cohort_stable_at": pd.NaT,
+                "cohort_baseline_start": pd.NaT,
+                "cohort_baseline_end": pd.NaT,
+                "active_at": pd.NaT,
+            })
+        return upgraded_to_high
+
+    for index, row in raw_frame.iterrows():
+        timestamp = row["timestamp"]
+        output = _v2_blank_features(config)
+        if pd.isna(timestamp):
+            feature_rows.append(output)
+            continue
+
+        gap_detected = bool(
+            prior_timestamp is not None
+            and (timestamp - prior_timestamp).total_seconds() / 60
+            > float(cfg["max_data_gap_minutes"])
+        )
+        if gap_detected:
+            start_cohort(
+                timestamp,
+                detected=False,
+                new_confidence="LOW",
+                score=0.0,
+                reason="DATA_GAP",
+                initial_state="UNAVAILABLE",
+            )
+            prior_detector = None
+            prior_detector_time = None
+            for history in delta_history.values():
+                history.clear()
+
+        trader_consistent = bool(
+            row["total_traders"] > 0
+            and row["long_traders"] > 0
+            and row["short_traders"] > 0
+            and abs(row["total_traders"] - row["long_traders"] - row["short_traders"])
+            <= config["quality"]["trader_total_tolerance"]
+        )
+        deltas = {field: math.nan for field in cfg["structural_weights"]}
+        if trader_consistent and prior_detector is not None:
+            for field in cfg["structural_weights"]:
+                deltas[field] = _signed_relative_change(row[field], prior_detector[field])
+        absolute = {field: abs(value) if not pd.isna(value) else math.nan for field, value in deltas.items()}
+        total_jump = (
+            not pd.isna(absolute["total_traders"])
+            and absolute["total_traders"] >= cfg["total_trader_change_threshold"]
+        )
+        long_jump = (
+            not pd.isna(absolute["long_traders"])
+            and absolute["long_traders"] >= cfg["side_trader_change_threshold"]
+        )
+        short_jump = (
+            not pd.isna(absolute["short_traders"])
+            and absolute["short_traders"] >= cfg["side_trader_change_threshold"]
+        )
+        hard_trigger = bool(trader_consistent and (total_jump or long_jump or short_jump))
+
+        z_scores = {
+            field: _causal_robust_z(deltas[field], delta_history[field], timestamp, cfg)
+            for field in cfg["structural_weights"]
+        }
+        minimum_changes = cfg["structural_min_abs_change"]
+        anomalous = [
+            field for field, z_value in z_scores.items()
+            if (
+                not pd.isna(z_value)
+                and z_value >= cfg["structural_z_threshold"]
+                and not pd.isna(absolute[field])
+                and absolute[field] >= float(minimum_changes[field])
+            )
+        ]
+        structural_score = sum(float(cfg["structural_weights"][field]) for field in anomalous)
+        trader_anomalies = len(set(anomalous) & STRUCTURAL_TRADER_FIELDS)
+        primary_anomalies = len(set(anomalous) & STRUCTURAL_PRIMARY_FIELDS)
+        diverse_primary_support = trader_anomalies >= 1 or primary_anomalies >= 2
+        structural_trigger = bool(
+            not hard_trigger
+            and structural_score >= cfg["structural_score_threshold"]
+            and len(anomalous) >= int(cfg["structural_min_anomalous_fields"])
+            and diverse_primary_support
+        )
+        prior_supported = _time_prior_supported(timestamp, high_refresh_minutes, cfg)
+        refresh_candidate = hard_trigger or structural_trigger
+        trigger_confidence = (
+            "HIGH" if hard_trigger else "MEDIUM" if structural_trigger and prior_supported else "LOW"
+        )
+        refresh_score = (
+            2 * int(total_jump) + int(long_jump) + int(short_jump) + structural_score
+        )
+        stable_pair = bool(
+            trader_consistent
+            and prior_detector is not None
+            and absolute["total_traders"] <= cfg["stable_total_trader_change"]
+            and absolute["long_traders"] <= cfg["stable_side_trader_change"]
+            and absolute["short_traders"] <= cfg["stable_side_trader_change"]
+        )
+
+        detected_now = False
+        expired_now = False
+        if cohort_id is None:
+            start_cohort(
+                timestamp,
+                detected=False,
+                new_confidence=confidence,
+                score=0.0,
+                reason="INITIAL_DATA",
+            )
+        elif state != "REFRESHING" and refresh_candidate:
+            reason = "HARD_TRADER_JUMP" if hard_trigger else "STRUCTURAL_BREAK"
+            within_same_refresh_episode = bool(
+                state in {"STABILIZING", "BASELINE_BUILDING"}
+                or (
+                    state == "ACTIVE_COHORT"
+                    and last_refresh_timestamp is not None
+                    and (timestamp - last_refresh_timestamp).total_seconds() / 3600
+                    < float(cfg["min_refresh_separation_hours"])
+                )
+            )
+            if within_same_refresh_episode:
+                upgraded_to_high = reset_refresh_in_place(
+                    timestamp,
+                    new_confidence=trigger_confidence,
+                    score=refresh_score,
+                    reason=reason,
+                )
+                if upgraded_to_high:
+                    high_refresh_minutes.append(timestamp.hour * 60 + timestamp.minute)
+            else:
+                start_cohort(
+                    timestamp,
+                    detected=True,
+                    new_confidence=trigger_confidence,
+                    score=refresh_score,
+                    reason=reason,
+                )
+                last_refresh_timestamp = timestamp
+                detected_now = True
+                if hard_trigger:
+                    high_refresh_minutes.append(timestamp.hour * 60 + timestamp.minute)
+        elif (
+            state == "ACTIVE_COHORT"
+            and cohort_start is not None
+            and (timestamp - cohort_start).total_seconds() / 3600
+            > float(cfg["max_cohort_age_hours"])
+        ):
+            state = "COHORT_EXPIRED"
+            expired_now = True
+            baseline = None
+            if cohort_summary is not None:
+                cohort_summary["expired_at"] = timestamp
+        elif state in {"REFRESHING", "STABILIZING", "UNAVAILABLE"}:
+            if not stable_pair:
+                if state != "UNAVAILABLE":
+                    state = "REFRESHING"
+                stable_run_start = None
+            else:
+                if state in {"REFRESHING", "UNAVAILABLE"} or stable_run_start is None:
+                    state = "STABILIZING"
+                    stable_run_start = prior_detector_time or timestamp
+                    refresh_end = stable_run_start
+                if (timestamp - stable_run_start).total_seconds() / 60 >= cfg["stabilization_minutes"]:
+                    stable_at = baseline_start = timestamp
+                    baseline_rows = []
+                    state = "BASELINE_BUILDING"
+                    if cohort_summary is not None:
+                        cohort_summary.update({
+                            "cohort_refresh_end": refresh_end,
+                            "cohort_stable_at": stable_at,
+                            "cohort_baseline_start": baseline_start,
+                        })
+
+        if state == "BASELINE_BUILDING" and bool(row["_quality_signal_ok"]):
+            baseline_rows.append({source: row[source] for source in BASELINE_COLUMNS.values()})
+            baseline_start = baseline_start or timestamp
+            if (timestamp - baseline_start).total_seconds() / 60 >= cfg["baseline_minutes"]:
+                candidate = _build_baseline(baseline_rows)
+                if candidate is not None:
+                    baseline, baseline_end, state = candidate, timestamp, "ACTIVE_COHORT"
+                    if cohort_summary is not None:
+                        cohort_summary.update({
+                            "cohort_baseline_start": baseline_start,
+                            "cohort_baseline_end": baseline_end,
+                            "active_at": timestamp,
+                            **{f"baseline_{name}": value for name, value in baseline.items()},
+                        })
+
+        reliable = confidence in {"HIGH", "MEDIUM"}
+        comparable = bool(
+            state == "ACTIVE_COHORT"
+            and reliable
+            and row["_quality_signal_ok"]
+            and baseline is not None
+        )
+        output.update({
+            "cohort_id": cohort_id,
+            "analysis_state": state,
+            "cohort_confidence": confidence,
+            "cohort_refresh_detected": detected_now,
+            "cohort_refresh_score": refresh_score,
+            "hard_refresh_trigger": hard_trigger,
+            "structural_refresh_trigger": structural_trigger,
+            "structural_refresh_score": structural_score,
+            "structural_anomalous_fields": "|".join(anomalous),
+            "structural_anomalous_field_count": len(anomalous),
+            "refresh_time_prior_supported": prior_supported,
+            "is_refresh_window": state == "REFRESHING",
+            "is_stabilization_window": state == "STABILIZING",
+            "minutes_since_cohort_start": (
+                (timestamp - cohort_start).total_seconds() / 60 if cohort_start else math.nan
+            ),
+            "cohort_refresh_start": refresh_start,
+            "cohort_refresh_end": refresh_end,
+            "cohort_stable_at": stable_at,
+            "cohort_baseline_start": baseline_start,
+            "cohort_baseline_end": baseline_end,
+            "signal_eligible": comparable,
+            "backtest_primary": comparable,
+            "out_of_sample": bool(timestamp >= freeze),
+            "data_gap_detected": gap_detected,
+            "cohort_expired_now": expired_now,
+            **{f"structural_z_{field}": value for field, value in z_scores.items()},
+        })
+        gross = row["long_pos_usdt"] + row["short_pos_usdt"]
+        net = row["long_pos_usdt"] - row["short_pos_usdt"]
+        long_return = _safe_ratio(row["current_price"], row["long_avg_price"]) - 1
+        short_return = _safe_ratio(row["short_avg_price"], row["current_price"]) - 1
+        output.update({
+            "gross_position": gross,
+            "net_exposure": net,
+            "net_exposure_share": _safe_ratio(net, gross) if gross > 0 else math.nan,
+            "avg_long_position": _safe_ratio(row["long_pos_usdt"], row["long_traders"]),
+            "avg_short_position": _safe_ratio(row["short_pos_usdt"], row["short_traders"]),
+            "long_directional_return": long_return,
+            "short_directional_return": short_return,
+            "long_loss_depth": max(0.0, -long_return) if not pd.isna(long_return) else math.nan,
+            "short_loss_depth": max(0.0, -short_return) if not pd.isna(short_return) else math.nan,
+        })
+        output["avg_position_ratio"] = _safe_ratio(
+            output["avg_long_position"], output["avg_short_position"]
+        )
+        if comparable and baseline is not None:
+            output.update({
+                "baseline_price": baseline["price"],
+                "baseline_long_pos": baseline["long_pos"],
+                "baseline_short_pos": baseline["short_pos"],
+                "baseline_long_avg_price": baseline["long_avg_price"],
+                "baseline_short_avg_price": baseline["short_avg_price"],
+                "baseline_long_traders": baseline["long_traders"],
+                "baseline_short_traders": baseline["short_traders"],
+                "baseline_long_unrealized_pnl": baseline["long_unrealized_pnl"],
+                "baseline_short_unrealized_pnl": baseline["short_unrealized_pnl"],
+                "cohort_net_flow": _safe_ratio(
+                    net - (baseline["long_pos"] - baseline["short_pos"]),
+                    baseline["long_pos"] + baseline["short_pos"],
+                ),
+                "long_position_change_pct": _safe_ratio(row["long_pos_usdt"], baseline["long_pos"]) - 1,
+                "short_position_change_pct": _safe_ratio(row["short_pos_usdt"], baseline["short_pos"]) - 1,
+                "long_avg_entry_change": _safe_ratio(row["long_avg_price"], baseline["long_avg_price"]) - 1,
+                "short_avg_entry_change": _safe_ratio(row["short_avg_price"], baseline["short_avg_price"]) - 1,
+                "ls_ratio_change_within_cohort": _safe_ratio(row["ls_ratio"], baseline["ls_ratio"]) - 1,
+            })
+            baseline_long_return = _safe_ratio(baseline["price"], baseline["long_avg_price"]) - 1
+            baseline_short_return = _safe_ratio(baseline["short_avg_price"], baseline["price"]) - 1
+            output["long_existing_loss_at_cohort_start"] = (
+                baseline_long_return < config["loss"]["existing_loss_threshold"]
+            )
+            output["short_existing_loss_at_cohort_start"] = (
+                baseline_short_return < config["loss"]["existing_loss_threshold"]
+            )
+
+        if detected_now:
+            old_flag = str(raw_frame.at[index, "data_quality_flag"])
+            raw_frame.at[index, "data_quality_flag"] = (
+                "COHORT_REFRESH" if old_flag == "OK" else f"{old_flag}|COHORT_REFRESH"
+            )
+        if cohort_summary is not None:
+            cohort_summary["record_count"] += 1
+            cohort_summary["signal_eligible_records"] += int(comparable)
+            cohort_summary["expired_records"] += int(state == "COHORT_EXPIRED")
+            cohort_summary["final_state"] = state
+        feature_rows.append(output)
+
+        if trader_consistent:
+            if prior_detector is not None:
+                for field in cfg["structural_weights"]:
+                    if not pd.isna(deltas[field]):
+                        delta_history[field].append((timestamp, deltas[field]))
+                    cutoff = timestamp - pd.Timedelta(hours=cfg["structural_window_hours"])
+                    delta_history[field] = [
+                        item for item in delta_history[field] if item[0] >= cutoff
+                    ]
+            prior_detector, prior_detector_time = row, timestamp
+        prior_timestamp = timestamp
+
+    if cohort_summary is not None:
+        cohort_summary["cohort_end"] = prior_timestamp
+        cohort_summary["final_state"] = state
+        cohort_rows.append(cohort_summary)
+    processed = pd.concat([raw_frame.reset_index(drop=True), pd.DataFrame(feature_rows)], axis=1)
+    return processed, pd.DataFrame(cohort_rows)
+
+
+def build_loss_event_tables(
+    processed: pd.DataFrame, config: dict[str, Any]
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Build causal loss episodes and first-threshold action events."""
+    result = processed.copy()
+    cfg = config["loss"]
+    for side in ("long", "short"):
+        result[f"{side}_new_loss_event"] = False
+        result[f"{side}_recovery_event"] = False
+        result[f"{side}_action_event"] = False
+        result[f"{side}_action_type"] = None
+        result[f"{side}_action_event_id"] = None
+        result[f"{side}_loss_event_id"] = None
+        result[f"{side}_loss_start_timestamp"] = pd.Series(
+            pd.NaT, index=result.index, dtype="datetime64[ns, UTC]"
+        )
+        for suffix in [
+            "loss_start_price", "loss_start_position", "loss_start_avg_entry",
+            "loss_start_net_exposure", "loss_duration_minutes",
+            "position_change_since_loss", "avg_entry_change_since_loss",
+        ]:
+            result[f"{side}_{suffix}"] = np.nan
+        result[f"{side}_loss_response"] = None
+    result["event_markers"] = ""
+
+    active: dict[str, dict[str, Any] | None] = {"long": None, "short": None}
+    cooldown_until: dict[str, pd.Timestamp | None] = {"long": None, "short": None}
+    counters: defaultdict[tuple[str, str], int] = defaultdict(int)
+    episodes: list[dict[str, Any]] = []
+    actions: list[dict[str, Any]] = []
+    recoveries: list[dict[str, Any]] = []
+    previous_cohort: str | None = None
+    last_active_row: dict[str, pd.Series | None] = {"long": None, "short": None}
+
+    def finalize(
+        side: str,
+        episode: dict[str, Any],
+        row: pd.Series | None,
+        *,
+        recovered: bool,
+        reason: str,
+    ) -> None:
+        if row is not None:
+            timestamp = row["timestamp"]
+            position = row[f"{side}_pos_usdt"]
+            change = _safe_ratio(position, episode["loss_start_position"]) - 1
+            episode["episode_end_timestamp"] = timestamp
+            episode["loss_end_timestamp"] = timestamp
+            episode["loss_end_price"] = row["current_price"]
+            episode["loss_end_avg_entry"] = row[f"{side}_avg_price"]
+            episode["cohort_net_flow_at_end"] = row["cohort_net_flow"]
+            episode["final_response"] = _response(change, cfg)
+            episode["max_loss_duration"] = max(
+                episode["max_loss_duration"],
+                (timestamp - episode["loss_start_timestamp"]).total_seconds() / 60,
+            )
+        episode["episode_end_reason"] = reason
+        episode["event_status"] = "RECOVERED" if recovered else reason
+        episode["recovered"] = recovered
+        episode["action_sequence"] = "→".join(episode.pop("_action_order")) or "NONE"
+        episode.pop("_seen_add", None)
+        episode.pop("_seen_reduce", None)
+        episode["loss_depth_bucket"] = _loss_depth_bucket(
+            episode["max_loss_depth"], cfg["depth_bucket_edges"]
+        )
+        episode["loss_duration_bucket"] = _duration_bucket(
+            episode["max_loss_duration"]
+        )
+        episode["position_response_bucket"] = _position_bucket(
+            episode["max_position_add_pct"]
+            if episode["final_response"] == "ADD"
+            else episode["max_position_reduce_pct"]
+            if episode["final_response"] == "REDUCE"
+            else 0.0
+        )
+        episodes.append(episode)
+
+    for index, row in result.iterrows():
+        timestamp, cohort_id = row["timestamp"], row["cohort_id"]
+        if pd.isna(timestamp):
+            continue
+        if previous_cohort is not None and cohort_id != previous_cohort:
+            for side in ("long", "short"):
+                if active[side] is not None:
+                    finalize(
+                        side, active[side], last_active_row[side],
+                        recovered=False, reason="COHORT_CHANGED",
+                    )
+                    active[side] = None
+                cooldown_until[side] = None
+                last_active_row[side] = None
+        previous_cohort = cohort_id
+        markers: list[str] = []
+
+        if not bool(row["signal_eligible"]):
+            if row["analysis_state"] in {
+                "REFRESHING", "STABILIZING", "BASELINE_BUILDING",
+                "COHORT_EXPIRED", "UNAVAILABLE",
+            }:
+                for side in ("long", "short"):
+                    if active[side] is not None:
+                        finalize(
+                            side, active[side], last_active_row[side],
+                            recovered=False, reason=str(row["analysis_state"]),
+                        )
+                        active[side] = None
+            continue
+
+        for side in ("long", "short"):
+            directional_return = row[f"{side}_directional_return"]
+            position = row[f"{side}_pos_usdt"]
+            avg_entry = row[f"{side}_avg_price"]
+            baseline_return = (
+                _safe_ratio(row["baseline_price"], row["baseline_long_avg_price"]) - 1
+                if side == "long"
+                else _safe_ratio(row["baseline_short_avg_price"], row["baseline_price"]) - 1
+            )
+            episode = active[side]
+            if episode is None:
+                clean = (
+                    not bool(row[f"{side}_existing_loss_at_cohort_start"])
+                    and baseline_return >= cfg["clean_baseline_threshold"]
+                )
+                cooled_down = (
+                    cooldown_until[side] is None or timestamp >= cooldown_until[side]
+                )
+                if clean and cooled_down and directional_return <= cfg["loss_entry_threshold"]:
+                    date_key = timestamp.strftime("%Y%m%d")
+                    counters[(side, date_key)] += 1
+                    episode_id = (
+                        f"{side.upper()}_{date_key}_{counters[(side, date_key)]:03d}"
+                    )
+                    episode = {
+                        "analysis_logic_version": ANALYSIS_LOGIC_VERSION,
+                        "event_family": "LOSS_EPISODE",
+                        "event_id": episode_id,
+                        "episode_id": episode_id,
+                        "event_type": f"{side.upper()}_NEW_LOSS",
+                        "event_timestamp": timestamp,
+                        "event_price": row["current_price"],
+                        "cohort_id": cohort_id,
+                        "cohort_confidence": row["cohort_confidence"],
+                        "side": side.upper(),
+                        "loss_start_timestamp": timestamp,
+                        "loss_start_price": row["current_price"],
+                        "loss_start_position": position,
+                        "loss_start_avg_entry": avg_entry,
+                        "loss_start_net_exposure": row["net_exposure"],
+                        "max_position": position,
+                        "min_position": position,
+                        "max_loss_depth": row[f"{side}_loss_depth"],
+                        "max_loss_duration": 0.0,
+                        "max_position_add_pct": 0.0,
+                        "max_position_reduce_pct": 0.0,
+                        "first_add_timestamp": pd.NaT,
+                        "first_add_price": np.nan,
+                        "first_add_position": np.nan,
+                        "first_add_avg_entry": np.nan,
+                        "first_add_loss_depth": np.nan,
+                        "first_add_loss_duration": np.nan,
+                        "first_add_net_exposure": np.nan,
+                        "first_add_cohort_net_flow": np.nan,
+                        "first_reduce_timestamp": pd.NaT,
+                        "first_reduce_price": np.nan,
+                        "first_reduce_position": np.nan,
+                        "first_reduce_avg_entry": np.nan,
+                        "first_reduce_loss_depth": np.nan,
+                        "first_reduce_loss_duration": np.nan,
+                        "first_reduce_net_exposure": np.nan,
+                        "first_reduce_cohort_net_flow": np.nan,
+                        "recovery_timestamp": pd.NaT,
+                        "recovery_price": np.nan,
+                        "episode_end_timestamp": pd.NaT,
+                        "episode_end_reason": "OPEN",
+                        "loss_end_timestamp": pd.NaT,
+                        "loss_end_price": np.nan,
+                        "loss_end_avg_entry": np.nan,
+                        "cohort_net_flow_at_start": row["cohort_net_flow"],
+                        "cohort_net_flow_at_end": np.nan,
+                        "final_response": "HOLD",
+                        "final_response_note": "DESCRIPTIVE_ONLY_NOT_FOR_CAUSAL_BACKTEST",
+                        "recovered": False,
+                        "event_status": "OPEN",
+                        "out_of_sample": bool(row["out_of_sample"]),
+                        "_action_order": [],
+                        "_seen_add": False,
+                        "_seen_reduce": False,
+                    }
+                    active[side] = episode
+                    result.at[index, f"{side}_new_loss_event"] = True
+                    markers.append(f"{side.upper()}_NEW_LOSS")
+
+            if episode is not None:
+                duration = (
+                    timestamp - episode["loss_start_timestamp"]
+                ).total_seconds() / 60
+                position_change = (
+                    _safe_ratio(position, episode["loss_start_position"]) - 1
+                )
+                avg_entry_change = (
+                    _safe_ratio(avg_entry, episode["loss_start_avg_entry"]) - 1
+                )
+                response = _response(position_change, cfg)
+                episode["max_position"] = max(episode["max_position"], position)
+                episode["min_position"] = min(episode["min_position"], position)
+                episode["max_loss_depth"] = max(
+                    episode["max_loss_depth"], row[f"{side}_loss_depth"]
+                )
+                episode["max_loss_duration"] = max(
+                    episode["max_loss_duration"], duration
+                )
+                episode["max_position_add_pct"] = max(
+                    episode["max_position_add_pct"], position_change
+                )
+                episode["max_position_reduce_pct"] = min(
+                    episode["max_position_reduce_pct"], position_change
+                )
+                episode["final_response"] = response
+                result.at[index, f"{side}_loss_event_id"] = episode["episode_id"]
+                result.at[index, f"{side}_loss_start_timestamp"] = episode["loss_start_timestamp"]
+                result.at[index, f"{side}_loss_start_price"] = episode["loss_start_price"]
+                result.at[index, f"{side}_loss_start_position"] = episode["loss_start_position"]
+                result.at[index, f"{side}_loss_start_avg_entry"] = episode["loss_start_avg_entry"]
+                result.at[index, f"{side}_loss_start_net_exposure"] = episode["loss_start_net_exposure"]
+                result.at[index, f"{side}_loss_duration_minutes"] = duration
+                result.at[index, f"{side}_position_change_since_loss"] = position_change
+                result.at[index, f"{side}_avg_entry_change_since_loss"] = avg_entry_change
+                result.at[index, f"{side}_loss_response"] = response
+
+                for action_type, threshold_met in (
+                    ("ADD", position_change >= cfg["add_threshold"]),
+                    ("REDUCE", position_change <= cfg["reduce_threshold"]),
+                ):
+                    seen_key = f"_seen_{action_type.lower()}"
+                    if not episode[seen_key] and threshold_met:
+                        episode[seen_key] = True
+                        episode["_action_order"].append(action_type)
+                        action_event_id = f"{episode['episode_id']}_{action_type}"
+                        action = {
+                            "analysis_logic_version": ANALYSIS_LOGIC_VERSION,
+                            "event_family": "ACTION_EVENT",
+                            "event_id": action_event_id,
+                            "action_event_id": action_event_id,
+                            "episode_id": episode["episode_id"],
+                            "cohort_id": cohort_id,
+                            "cohort_confidence": row["cohort_confidence"],
+                            "side": side.upper(),
+                            "event_type": f"{side.upper()}_LOSS_{action_type}",
+                            "action_type": action_type,
+                            "event_timestamp": timestamp,
+                            "event_price": row["current_price"],
+                            "action_timestamp": timestamp,
+                            "action_price": row["current_price"],
+                            "action_position": position,
+                            "action_avg_entry": avg_entry,
+                            "position_change_since_loss": position_change,
+                            "avg_entry_change_since_loss": avg_entry_change,
+                            "loss_depth_at_action": row[f"{side}_loss_depth"],
+                            "loss_duration_at_action": duration,
+                            "cohort_net_flow_at_action": row["cohort_net_flow"],
+                            "net_exposure_at_action": row["net_exposure"],
+                            "loss_start_timestamp": episode["loss_start_timestamp"],
+                            "loss_start_price": episode["loss_start_price"],
+                            "out_of_sample": bool(row["out_of_sample"]),
+                        }
+                        actions.append(action)
+                        prefix = "first_add" if action_type == "ADD" else "first_reduce"
+                        episode[f"{prefix}_timestamp"] = timestamp
+                        episode[f"{prefix}_price"] = row["current_price"]
+                        episode[f"{prefix}_position"] = position
+                        episode[f"{prefix}_avg_entry"] = avg_entry
+                        episode[f"{prefix}_loss_depth"] = row[f"{side}_loss_depth"]
+                        episode[f"{prefix}_loss_duration"] = duration
+                        episode[f"{prefix}_net_exposure"] = row["net_exposure"]
+                        episode[f"{prefix}_cohort_net_flow"] = row["cohort_net_flow"]
+                        result.at[index, f"{side}_action_event"] = True
+                        result.at[index, f"{side}_action_type"] = action_type
+                        result.at[index, f"{side}_action_event_id"] = action_event_id
+                        markers.append(f"{side.upper()}_LOSS_{action_type}")
+
+                if directional_return >= cfg["recovery_threshold"]:
+                    result.at[index, f"{side}_recovery_event"] = True
+                    markers.append(f"{side.upper()}_RECOVERY")
+                    episode["recovery_timestamp"] = timestamp
+                    episode["recovery_price"] = row["current_price"]
+                    recoveries.append({
+                        "analysis_logic_version": ANALYSIS_LOGIC_VERSION,
+                        "event_family": "RECOVERY_EVENT",
+                        "event_id": f"{episode['episode_id']}_RECOVERY",
+                        "episode_id": episode["episode_id"],
+                        "cohort_id": cohort_id,
+                        "cohort_confidence": row["cohort_confidence"],
+                        "side": side.upper(),
+                        "event_type": f"{side.upper()}_RECOVERY",
+                        "event_timestamp": timestamp,
+                        "event_price": row["current_price"],
+                        "recovery_timestamp": timestamp,
+                        "recovery_price": row["current_price"],
+                        "out_of_sample": bool(row["out_of_sample"]),
+                    })
+                    finalize(
+                        side, episode, row, recovered=True, reason="RECOVERED"
+                    )
+                    active[side] = None
+                    cooldown_until[side] = timestamp + pd.Timedelta(
+                        minutes=cfg["cooldown_minutes"]
+                    )
+            last_active_row[side] = row
+        result.at[index, "event_markers"] = "|".join(markers)
+
+    for side in ("long", "short"):
+        if active[side] is not None:
+            finalize(
+                side, active[side], last_active_row[side],
+                recovered=False, reason="DATA_END",
+            )
+    episode_frame = pd.DataFrame(episodes)
+    action_frame = pd.DataFrame(actions)
+    recovery_frame = pd.DataFrame(recoveries)
+    combined = pd.concat(
+        [episode_frame, action_frame, recovery_frame],
+        ignore_index=True,
+        sort=False,
+    )
+    if not combined.empty:
+        combined = combined.sort_values(
+            ["event_timestamp", "event_family", "event_id"], kind="stable"
+        ).reset_index(drop=True)
+    return result, episode_frame, action_frame, combined
+
+
+def build_loss_events(
+    processed: pd.DataFrame, config: dict[str, Any]
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Compatibility wrapper; causal users should use build_loss_event_tables."""
+    result, _, _, events = build_loss_event_tables(processed, config)
+    return result, events
+
+
+def add_forward_returns(
+    events: pd.DataFrame,
+    processed: pd.DataFrame,
+    config: dict[str, Any],
+    event_timestamp_col: str = "event_timestamp",
+    event_price_col: str = "event_price",
+) -> pd.DataFrame:
+    result = events.copy()
+    horizons = config["backtest"]["forward_hours"]
+    for hours in horizons:
+        result[f"forward_return_{hours}h"] = np.nan
+        result[f"forward_price_timestamp_{hours}h"] = pd.Series(
+            pd.NaT, index=result.index, dtype="datetime64[ns, UTC]"
+        )
+        result[f"forward_price_delay_minutes_{hours}h"] = np.nan
+    if result.empty:
+        return result
+    prices = (
+        processed.loc[
+            processed["timestamp"].notna() & processed["current_price"].gt(0),
+            ["timestamp", "current_price"],
+        ]
+        .sort_values("timestamp")
+        .drop_duplicates("timestamp", keep="last")
+    )
+    timestamps = prices["timestamp"].astype("int64").to_numpy()
+    price_values = prices["current_price"].to_numpy(dtype=float)
+    tolerance = float(config["backtest"]["max_forward_price_delay_minutes"])
+    for index, event in result.iterrows():
+        event_timestamp = event.get(event_timestamp_col)
+        event_price = event.get(event_price_col)
+        if pd.isna(event_timestamp) or pd.isna(event_price) or float(event_price) <= 0:
+            continue
+        for hours in horizons:
+            target = event_timestamp + pd.Timedelta(hours=hours)
+            future_index = int(np.searchsorted(timestamps, target.value, side="left"))
+            if future_index >= len(timestamps):
+                continue
+            observed_at = pd.Timestamp(timestamps[future_index], tz="UTC")
+            delay = (observed_at - target).total_seconds() / 60
+            if not 0 <= delay <= tolerance:
+                continue
+            result.at[index, f"forward_return_{hours}h"] = (
+                price_values[future_index] / float(event_price) - 1
+            )
+            result.at[index, f"forward_price_timestamp_{hours}h"] = observed_at
+            result.at[index, f"forward_price_delay_minutes_{hours}h"] = delay
+    return result
+
+
+def _forward_returns_for_controls(
+    controls: pd.DataFrame,
+    processed: pd.DataFrame,
+    hours: float,
+    tolerance_minutes: float,
+) -> np.ndarray:
+    prices = (
+        processed.loc[
+            processed["timestamp"].notna() & processed["current_price"].gt(0),
+            ["timestamp", "current_price"],
+        ]
+        .sort_values("timestamp")
+        .drop_duplicates("timestamp", keep="last")
+    )
+    timestamps = prices["timestamp"].astype("int64").to_numpy()
+    values = prices["current_price"].to_numpy(dtype=float)
+    returns: list[float] = []
+    for _, row in controls.iterrows():
+        target = row["timestamp"] + pd.Timedelta(hours=hours)
+        future_index = int(np.searchsorted(timestamps, target.value, side="left"))
+        if future_index >= len(timestamps):
+            continue
+        observed_at = pd.Timestamp(timestamps[future_index], tz="UTC")
+        delay = (observed_at - target).total_seconds() / 60
+        if 0 <= delay <= tolerance_minutes and row["current_price"] > 0:
+            returns.append(values[future_index] / row["current_price"] - 1)
+    return np.asarray(returns, dtype=float)
+
+
+def build_backtest(
+    events: pd.DataFrame, processed: pd.DataFrame, config: dict[str, Any]
+) -> pd.DataFrame:
+    columns = [
+        "analysis_logic_version", "dataset", "sensitivity", "event_type",
+        "segment", "segment_value", "horizon", "sample_count",
+        "mean_forward_return", "median_forward_return", "win_rate", "p25", "p75",
+        "bootstrap_ci_low", "bootstrap_ci_high", "unconditional_return",
+        "difference_vs_unconditional", "directional_success_rate",
+        "sample_size_warning",
+    ]
+    if events.empty:
+        return pd.DataFrame(columns=columns)
+    research = events[
+        events["event_family"].isin(["LOSS_EPISODE", "ACTION_EVENT"])
+    ].copy()
+    if research.empty:
+        return pd.DataFrame(columns=columns)
+    rng = np.random.default_rng(config["backtest"]["random_seed"])
+    rows: list[dict[str, Any]] = []
+    sensitivities = [
+        ("conservative_high_only", {"HIGH"}),
+        ("standard_high_medium", {"HIGH", "MEDIUM"}),
+    ]
+    datasets = [
+        ("exploratory_historical", False),
+        ("out_of_sample", True),
+    ]
+    all_event_times = set(research["event_timestamp"].dropna())
+    for dataset_name, is_oos in datasets:
+        for sensitivity, allowed_confidence in sensitivities:
+            selected = research[
+                (research["out_of_sample"] == is_oos)
+                & research["cohort_confidence"].isin(allowed_confidence)
+            ]
+            for event_type, group in selected.groupby("event_type", sort=True):
+                cohort_ids = set(group["cohort_id"].dropna())
+                controls = processed[
+                    (processed["signal_eligible"])
+                    & (processed["out_of_sample"] == is_oos)
+                    & processed["cohort_confidence"].isin(allowed_confidence)
+                    & processed["cohort_id"].isin(cohort_ids)
+                    & ~processed["timestamp"].isin(all_event_times)
+                ]
+                for hours in config["backtest"]["forward_hours"]:
+                    values = group[f"forward_return_{hours}h"].dropna().to_numpy(dtype=float)
+                    low, high = _bootstrap_mean_ci(
+                        values, config["backtest"]["bootstrap_samples"], rng
+                    )
+                    control_values = _forward_returns_for_controls(
+                        controls,
+                        processed,
+                        hours,
+                        config["backtest"]["max_forward_price_delay_minutes"],
+                    )
+                    baseline_mean = (
+                        float(np.mean(control_values)) if len(control_values) else math.nan
+                    )
+                    event_mean = float(np.mean(values)) if len(values) else math.nan
+                    directional_success = math.nan
+                    if event_type == "LONG_LOSS_ADD" and len(values):
+                        directional_success = float(np.mean(values > 0))
+                    elif event_type == "SHORT_LOSS_ADD" and len(values):
+                        directional_success = float(np.mean(values < 0))
+                    sample_warning = (
+                        "VERY_SMALL" if len(values) < 20
+                        else "SMALL" if len(values) < 50
+                        else "ADEQUATE"
+                    )
+                    rows.append({
+                        "analysis_logic_version": ANALYSIS_LOGIC_VERSION,
+                        "dataset": dataset_name,
+                        "sensitivity": sensitivity,
+                        "event_type": event_type,
+                        "segment": "overall",
+                        "segment_value": "all",
+                        "horizon": f"{hours}h",
+                        "sample_count": len(values),
+                        "mean_forward_return": event_mean,
+                        "median_forward_return": (
+                            float(np.median(values)) if len(values) else math.nan
+                        ),
+                        "win_rate": float(np.mean(values > 0)) if len(values) else math.nan,
+                        "p25": float(np.quantile(values, 0.25)) if len(values) else math.nan,
+                        "p75": float(np.quantile(values, 0.75)) if len(values) else math.nan,
+                        "bootstrap_ci_low": low,
+                        "bootstrap_ci_high": high,
+                        "unconditional_return": baseline_mean,
+                        "difference_vs_unconditional": (
+                            event_mean - baseline_mean
+                            if not pd.isna(event_mean) and not pd.isna(baseline_mean)
+                            else math.nan
+                        ),
+                        "directional_success_rate": directional_success,
+                        "sample_size_warning": sample_warning,
                     })
     return pd.DataFrame(rows, columns=columns)
 
@@ -932,6 +2027,39 @@ def _chinese_frame(frame: pd.DataFrame) -> pd.DataFrame:
         "long_loss_response": RESPONSE_ZH,
         "short_loss_response": RESPONSE_ZH,
         "event_status": STATUS_ZH,
+        "episode_end_reason": STATUS_ZH,
+        "action_type": RESPONSE_ZH,
+        "cohort_confidence": {"HIGH": "高", "MEDIUM": "中", "LOW": "低"},
+        "event_family": {
+            "LOSS_EPISODE": "新亏损过程",
+            "ACTION_EVENT": "首次动作事件",
+            "RECOVERY_EVENT": "恢复盈利事件",
+        },
+        "sensitivity": {
+            "conservative_high_only": "保守口径（仅高可信批次）",
+            "standard_high_medium": "标准口径（高+中可信批次）",
+        },
+        "sample_size_warning": {
+            "VERY_SMALL": "样本极少",
+            "SMALL": "样本偏少",
+            "ADEQUATE": "样本量尚可",
+        },
+        "cohort_definition": {
+            "INFERRED_STABLE_SAMPLE_WINDOW": "推断的稳定样本窗口",
+        },
+        "refresh_reason": {
+            "INITIAL_DATA": "历史数据起点",
+            "HARD_TRADER_JUMP": "交易者人数明显跳变",
+            "STRUCTURAL_BREAK": "多字段结构突变",
+            "DATA_GAP": "长时间数据中断",
+        },
+        "action_sequence": {
+            "ADD": "加仓",
+            "REDUCE": "减仓",
+            "ADD→REDUCE": "先加仓→后减仓",
+            "REDUCE→ADD": "先减仓→后加仓",
+            "NONE": "无明显动作",
+        },
         "dataset": {
             "exploratory_historical": "历史探索数据",
             "out_of_sample": "样本外验证数据",
@@ -961,7 +2089,7 @@ def _chinese_frame(frame: pd.DataFrame) -> pd.DataFrame:
     }
     for column, mapping in replacements.items():
         if column in result:
-            result[column] = result[column].replace(mapping)
+            result[column] = result[column].map(lambda value: mapping.get(value, value))
     if "data_quality_flag" in result:
         result["data_quality_flag"] = result["data_quality_flag"].map(
             lambda value: _translate_joined(value, QUALITY_ZH)
@@ -975,7 +2103,11 @@ def _chinese_frame(frame: pd.DataFrame) -> pd.DataFrame:
             result[column] = result[column].astype("string").str.replace(
                 "cohort_", "批次_", regex=False
             )
-    for column in ("event_id", "long_loss_event_id", "short_loss_event_id"):
+    for column in (
+        "event_id", "episode_id", "action_event_id",
+        "long_loss_event_id", "short_loss_event_id",
+        "long_action_event_id", "short_action_event_id",
+    ):
         if column in result:
             result[column] = (
                 result[column].astype("string")
@@ -1013,19 +2145,31 @@ def _format_percent(value: Any) -> str:
 def _build_chinese_report(
     summary: dict[str, Any], events: pd.DataFrame, backtest: pd.DataFrame
 ) -> str:
+    episodes = (
+        events[events["event_family"] == "LOSS_EPISODE"]
+        if not events.empty else pd.DataFrame()
+    )
     lines = [
-        "# 聪明钱名单批次分析报告",
+        "# 聪明钱推断名单批次分析报告",
         "",
-        "## 数据与样本边界",
+        "## 研究边界与逻辑版本",
         "",
+        f"- 分析逻辑版本：{summary['analysis_logic_version']}",
+        "- 这里的批次是“推断的稳定样本窗口”，不是可追踪账户组成的真实固定名单。",
+        "- 币安没有提供可完整跨日追踪的聪明钱账户身份集合，因此系统宁可放弃不确定数据，也不假设名单连续。",
+        "- 旧版 LONG/SHORT_NEW_LOSS_ADD/REDUCE 回测已作废：旧分类使用未来动作，却从亏损开始时计算收益。",
         f"- 原始记录数：{summary['raw_records']:,}",
         f"- 有效记录数：{summary['valid_records']:,}",
         f"- 无效记录数：{summary['invalid_records']:,}",
-        f"- 识别名单批次数：{summary['cohorts_detected']}",
+        f"- 推断名单批次数：{summary['cohorts_detected']}",
+        f"- 高可信批次：{summary['high_cohorts']}",
+        f"- 中可信批次：{summary['medium_cohorts']}",
+        f"- 低可信批次：{summary['low_cohorts']}（默认不进入研究信号）",
+        f"- 批次过期状态记录数：{summary['expired_period_records']}",
         f"- 名单刷新次数：{summary['refresh_windows']}",
         f"- 模型冻结时间：{summary['model_freeze_date']}",
         f"- 样本外事件数：{summary['oos_events']}",
-        "- 冻结时间之前的全部结果只属于历史探索，不能称为样本外结论。",
+        "- 冻结时间之前的全部结果只属于历史探索；样本外解释仅适用于修正后事件逻辑部署后的新数据。",
         "",
         "## 数据质量",
         "",
@@ -1034,7 +2178,7 @@ def _build_chinese_report(
         lines.append(f"- {QUALITY_ZH.get(flag, flag)}：{count}")
     lines.extend([
         "",
-        "## 新亏损事件",
+        "## 新亏损过程与首次动作事件",
         "",
         f"- 多头新亏损事件：{summary['new_long_loss_events']}",
         f"- 空头新亏损事件：{summary['new_short_loss_events']}",
@@ -1042,17 +2186,20 @@ def _build_chinese_report(
     for key, count in summary["response_counts"].items():
         side, response = key.split("_", 1)
         lines.append(f"- {SIDE_ZH.get(side, side)}{RESPONSE_ZH.get(response, response)}：{count}")
-    recovered = int(events["recovered"].sum()) if not events.empty else 0
+    recovered = int(episodes["recovered"].sum()) if not episodes.empty else 0
     lines.extend([
         f"- 已恢复盈利：{recovered}",
-        f"- 尚未恢复或因名单刷新结束：{len(events) - recovered}",
+        f"- 尚未恢复或因批次变化结束：{len(episodes) - recovered}",
         "",
-        "## 历史探索回测",
+        "## 历史探索回测（因果事件时点）",
         "",
-        "空头事件仍使用比特币原始收益，没有乘以 -1。",
+        "- 新亏损收益从首次进入新亏损的时刻开始。",
+        "- 加仓/减仓收益从第一次越过动作阈值的时刻开始，不再从亏损起点回算。",
+        "- 未来目标价格只接受目标时刻之后 15 分钟内的第一条记录。",
+        "- 空头事件仍保存比特币原始收益，没有乘以 -1。",
         "",
-        "| 事件 | 周期 | 样本数 | 平均收益 | 中位数收益 | 正收益比例 | 自助法95%置信区间 |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        "| 可信度口径 | 事件 | 周期 | 样本 | 平均收益 | 中位数 | 正收益率 | 无条件基准 | 超额收益 | 方向正确率 | 95%置信区间 | 样本提示 |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ])
     overall = backtest[
         (backtest["dataset"] == "exploratory_historical")
@@ -1063,20 +2210,46 @@ def _build_chinese_report(
             f"{_format_percent(row['bootstrap_ci_low'])} 至 "
             f"{_format_percent(row['bootstrap_ci_high'])}"
         )
+        warning_label = {
+            "VERY_SMALL": "样本极少",
+            "SMALL": "样本偏少",
+            "ADEQUATE": "样本量尚可",
+        }.get(row["sample_size_warning"], row["sample_size_warning"])
         lines.append(
+            f"| {'仅高可信' if row['sensitivity'] == 'conservative_high_only' else '高+中可信'} "
             f"| {EVENT_TYPE_ZH.get(row['event_type'], row['event_type'])} "
             f"| {str(row['horizon']).replace('h', '小时')} | {int(row['sample_count'])} "
             f"| {_format_percent(row['mean_forward_return'])} "
             f"| {_format_percent(row['median_forward_return'])} "
-            f"| {_format_percent(row['win_rate'])} | {interval} |"
+            f"| {_format_percent(row['win_rate'])} "
+            f"| {_format_percent(row['unconditional_return'])} "
+            f"| {_format_percent(row['difference_vs_unconditional'])} "
+            f"| {_format_percent(row['directional_success_rate'])} "
+            f"| {interval} "
+            f"| {warning_label} |"
         )
     lines.extend([
         "",
-        "## 前十个名单刷新时间（UTC）",
+        "## 高可信刷新时间（协调世界时）",
         "",
-        *[f"- {timestamp}" for timestamp in summary["refresh_timestamps"]],
+        *[f"- {timestamp}" for timestamp in summary["high_refresh_timestamps"]],
         "",
-        "当前样本较少，所有统计只用于探索，不构成交易结论。",
+        "## 中可信刷新时间（协调世界时）",
+        "",
+        *[f"- {timestamp}" for timestamp in summary["medium_refresh_timestamps"]],
+        "",
+        "## 高可信刷新小时分布（协调世界时）",
+        "",
+        *[
+            f"- {hour}:00：{count} 次"
+            for hour, count in summary["high_refresh_utc_hour_histogram"].items()
+        ],
+        "",
+        "## 结论表述限制",
+        "",
+        "- 样本数少于 20 一律标记为“样本极少”；20 至 49 标记为“样本偏少”。",
+        "- 置信区间跨过零时，只能称为尚无统计证据。",
+        "- 本报告不会自动把任何结果称为有效策略或强交易信号。",
         "",
     ])
     return "\n".join(lines)
@@ -1093,15 +2266,35 @@ def run_pipeline(
     raw = prepare_raw_frame(records, config)
     processed, cohorts = reconstruct_cohorts(raw, config)
     processed = add_divergence_features(processed, config)
-    processed, events = build_loss_events(processed, config)
+    processed, episodes, actions, events = build_loss_event_tables(processed, config)
     events = add_forward_returns(events, processed, config)
-    backtest = build_backtest(events, config)
+    episodes = events[events["event_family"] == "LOSS_EPISODE"].copy()
+    actions = events[events["event_family"] == "ACTION_EVENT"].copy()
+    backtest = build_backtest(events, processed, config)
     refresh_rows = processed[processed["cohort_refresh_detected"]]
-    response_counts = (
-        events.groupby(["side", "final_response"]).size().to_dict()
-        if not events.empty else {}
+    action_counts = (
+        actions.groupby(["side", "action_type"]).size().to_dict()
+        if not actions.empty else {}
+    )
+    confidence_counts = (
+        cohorts["cohort_confidence"].value_counts().to_dict()
+        if not cohorts.empty else {}
+    )
+    high_refresh = cohorts[
+        cohorts["cohort_refresh_start"].notna()
+        & cohorts["cohort_confidence"].eq("HIGH")
+    ]
+    medium_refresh = cohorts[
+        cohorts["cohort_refresh_start"].notna()
+        & cohorts["cohort_confidence"].eq("MEDIUM")
+    ]
+    high_hour_histogram = (
+        high_refresh["cohort_refresh_start"].dt.hour.value_counts().sort_index().to_dict()
+        if not high_refresh.empty else {}
     )
     summary = {
+        "analysis_logic_version": ANALYSIS_LOGIC_VERSION,
+        "previous_action_backtest_status": "OBSOLETE_LOOKAHEAD_BIAS",
         "raw_file": str(raw_path.resolve()),
         "raw_file_unchanged": True,
         "raw_records": len(records),
@@ -1109,18 +2302,40 @@ def run_pipeline(
         "invalid_records": int((~processed["_quality_signal_ok"]).sum()),
         "model_freeze_date": config["model_freeze_date"],
         "cohorts_detected": int(len(cohorts)),
+        "high_cohorts": int(confidence_counts.get("HIGH", 0)),
+        "medium_cohorts": int(confidence_counts.get("MEDIUM", 0)),
+        "low_cohorts": int(confidence_counts.get("LOW", 0)),
+        "expired_period_records": int((processed["analysis_state"] == "COHORT_EXPIRED").sum()),
         "refresh_windows": int(len(refresh_rows)),
         "refresh_timestamps": [
             timestamp.isoformat() for timestamp in refresh_rows["timestamp"].head(10)
         ],
         "quality_counts": _quality_counts(processed["data_quality_flag"]),
-        "new_long_loss_events": int((events["side"] == "LONG").sum()) if not events.empty else 0,
-        "new_short_loss_events": int((events["side"] == "SHORT").sum()) if not events.empty else 0,
+        "high_refresh_timestamps": [
+            value.isoformat() for value in high_refresh["cohort_refresh_start"]
+        ],
+        "medium_refresh_timestamps": [
+            value.isoformat() for value in medium_refresh["cohort_refresh_start"]
+        ],
+        "high_refresh_utc_hour_histogram": {
+            str(int(hour)): int(count) for hour, count in high_hour_histogram.items()
+        },
+        "new_long_loss_events": int((episodes["side"] == "LONG").sum()) if not episodes.empty else 0,
+        "new_short_loss_events": int((episodes["side"] == "SHORT").sum()) if not episodes.empty else 0,
+        "action_counts": {
+            f"{side}_{response}": int(count)
+            for (side, response), count in action_counts.items()
+        },
         "response_counts": {
             f"{side}_{response}": int(count)
-            for (side, response), count in response_counts.items()
+            for (side, response), count in action_counts.items()
         },
-        "oos_events": int(events["out_of_sample"].sum()) if not events.empty else 0,
+        "oos_events": int(
+            events.loc[
+                events["event_family"].isin(["LOSS_EPISODE", "ACTION_EVENT"]),
+                "out_of_sample",
+            ].sum()
+        ) if not events.empty else 0,
         "source_latest_timestamp": raw_metadata.get("latest_timestamp"),
     }
     summary["中文摘要"] = {
@@ -1129,6 +2344,10 @@ def run_pipeline(
         "无效记录数": summary["invalid_records"],
         "模型冻结时间": summary["model_freeze_date"],
         "识别名单批次数": summary["cohorts_detected"],
+        "高可信批次数": summary["high_cohorts"],
+        "中可信批次数": summary["medium_cohorts"],
+        "低可信批次数": summary["low_cohorts"],
+        "批次过期记录数": summary["expired_period_records"],
         "名单刷新次数": summary["refresh_windows"],
         "前十个名单刷新时间": summary["refresh_timestamps"],
         "数据质量统计": {
@@ -1137,7 +2356,7 @@ def run_pipeline(
         },
         "多头新亏损事件数": summary["new_long_loss_events"],
         "空头新亏损事件数": summary["new_short_loss_events"],
-        "亏损后操作统计": {
+        "首次动作事件统计": {
             f"{SIDE_ZH.get(key.split('_', 1)[0], key)}"
             f"{RESPONSE_ZH.get(key.split('_', 1)[1], '')}": count
             for key, count in summary["response_counts"].items()
@@ -1145,6 +2364,8 @@ def run_pipeline(
         "样本外事件数": summary["oos_events"],
         "原始数据最新时间": summary["source_latest_timestamp"],
         "原始历史文件是否保持不变": True,
+        "分析逻辑版本": ANALYSIS_LOGIC_VERSION,
+        "旧动作回测状态": "已作废：动作分类使用了未来信息",
     }
     if write_outputs:
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -1157,6 +2378,8 @@ def run_pipeline(
         _atomic_parquet(processed.drop(columns=internal), processed_path)
         _atomic_parquet(events, events_path)
         _atomic_parquet(cohorts, cohorts_path)
+        _atomic_parquet(episodes, output_dir / LOSS_EPISODES_PATH.name)
+        _atomic_parquet(actions, output_dir / ACTION_EVENTS_PATH.name)
         backtest.to_csv(backtest_path, index=False)
         _atomic_parquet(
             _chinese_frame(processed.drop(columns=internal)),
@@ -1164,6 +2387,14 @@ def run_pipeline(
         )
         _atomic_parquet(
             _chinese_frame(events), output_dir / CHINESE_EVENTS_PATH.name
+        )
+        _atomic_parquet(
+            _chinese_frame(episodes),
+            output_dir / CHINESE_LOSS_EPISODES_PATH.name,
+        )
+        _atomic_parquet(
+            _chinese_frame(actions),
+            output_dir / CHINESE_ACTION_EVENTS_PATH.name,
         )
         _atomic_parquet(
             _chinese_frame(cohorts), output_dir / CHINESE_COHORTS_PATH.name
@@ -1181,16 +2412,20 @@ def run_pipeline(
             json.dump(summary, handle, ensure_ascii=False, indent=2, default=_json_default)
     print(
         "聪明钱分析处理完成 | "
+        f"逻辑版本={ANALYSIS_LOGIC_VERSION} "
         f"原始记录={summary['raw_records']} 有效记录={summary['valid_records']} "
         f"无效记录={summary['invalid_records']} 名单批次={summary['cohorts_detected']} "
         f"名单刷新={summary['refresh_windows']} "
+        f"高/中/低可信批次={summary['high_cohorts']}/{summary['medium_cohorts']}/{summary['low_cohorts']} "
         f"多头新亏损事件={summary['new_long_loss_events']} "
         f"空头新亏损事件={summary['new_short_loss_events']} "
+        f"首次动作事件={len(actions)} "
         f"样本外事件={summary['oos_events']}"
     )
     return {
-        "processed": processed, "events": events, "cohorts": cohorts,
-        "backtest": backtest, "summary": summary,
+        "processed": processed, "events": events, "episodes": episodes,
+        "actions": actions, "cohorts": cohorts, "backtest": backtest,
+        "summary": summary,
     }
 
 

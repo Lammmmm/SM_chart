@@ -1,7 +1,7 @@
 {
   "中文说明": {
     "model_freeze_date": "模型冻结时间；此时间之后的新数据才属于样本外验证",
-    "cohort": "名单批次识别、稳定观察和基准构建参数",
+    "cohort": "推断名单批次识别、稳定观察和基准构建参数；不代表可追踪的固定账户集合",
     "total_trader_change_threshold": "交易者总人数变化达到此比例时，优先判断为名单刷新",
     "side_trader_change_threshold": "多头或空头人数变化达到此比例时，优先判断为名单刷新",
     "position_change_confirmation": "仓位变化达到此比例时，提高名单刷新可信度，但不能单独触发刷新",
@@ -9,6 +9,20 @@
     "stable_total_trader_change": "稳定期允许的交易者总人数最大变化比例",
     "stable_side_trader_change": "稳定期允许的单边交易者人数最大变化比例",
     "baseline_minutes": "稳定后用于计算中位数基准的分钟数",
+    "max_cohort_age_hours": "推断批次最长有效小时数；超时后进入批次已过期状态并停止生成信号",
+    "max_data_gap_minutes": "允许的数据中断上限；超过后无法确认名单连续性，批次转为不可用",
+    "initial_cohort_confidence": "没有刷新证据的初始批次可信度；低可信默认不进入研究",
+    "structural_window_hours": "结构突变稳健统计只使用当前时刻之前这段小时数的历史变化",
+    "structural_min_history": "计算稳健异常分数前要求的最少历史变化样本数",
+    "structural_z_threshold": "单字段被视为结构异常所需的稳健异常分数门槛",
+    "structural_score_threshold": "多个字段合计触发结构性刷新所需的总分门槛",
+    "structural_min_anomalous_fields": "结构性刷新至少需要同时异常的独立字段数",
+    "structural_mad_epsilon": "稳健离差为零时用于避免除零的极小值",
+    "refresh_prior_tolerance_minutes": "中可信结构突变与历史高可信刷新时间分布允许相差的分钟数",
+    "refresh_prior_min_samples": "启用历史刷新时间先验前要求的高可信刷新最少样本数",
+    "min_refresh_separation_hours": "相隔不足此小时数的连续结构跳变合并为同一轮刷新",
+    "structural_min_abs_change": "各结构字段除统计异常外还必须达到的最小实际变化幅度，避免微小噪声触发刷新",
+    "structural_weights": "结构突变总分中各字段的权重；仓位和盈亏只作辅助确认",
     "loss": "新亏损、加仓、减仓、恢复盈利和冷却期参数",
     "clean_baseline_threshold": "批次基准收益不低于此值，才有资格进入新亏损研究",
     "existing_loss_threshold": "批次开始时收益低于此值，标记为已有亏损",
@@ -19,7 +33,8 @@
     "cooldown_minutes": "同方向亏损事件结束后的冷却分钟数",
     "divergence": "比特币价格与批次净风险流背离参数",
     "quality": "数据质量一致性检查参数",
-    "backtest": "未来收益周期、自助法抽样次数和随机种子"
+    "backtest": "未来收益周期、自助法抽样次数、随机种子和价格时间容差",
+    "max_forward_price_delay_minutes": "目标时刻之后允许使用第一条价格的最大延迟分钟数；超过则该周期收益为空"
   },
   "smart_money_analysis": {
     "model_freeze_date": "2026-08-27T01:42:59Z",
@@ -30,7 +45,43 @@
       "stabilization_minutes": 30,
       "stable_total_trader_change": 0.02,
       "stable_side_trader_change": 0.03,
-      "baseline_minutes": 30
+      "baseline_minutes": 30,
+      "max_cohort_age_hours": 26,
+      "max_data_gap_minutes": 120,
+      "initial_cohort_confidence": "LOW",
+      "structural_window_hours": 24,
+      "structural_min_history": 24,
+      "structural_z_threshold": 6.0,
+      "structural_score_threshold": 6.0,
+      "structural_min_anomalous_fields": 3,
+      "structural_mad_epsilon": 1e-9,
+      "refresh_prior_tolerance_minutes": 120,
+      "refresh_prior_min_samples": 3,
+      "min_refresh_separation_hours": 18,
+      "structural_min_abs_change": {
+        "total_traders": 0.01,
+        "long_traders": 0.015,
+        "short_traders": 0.015,
+        "long_avg_price": 0.005,
+        "short_avg_price": 0.005,
+        "long_pos_usdt": 0.10,
+        "short_pos_usdt": 0.10,
+        "long_unrealized_pnl": 0.25,
+        "short_unrealized_pnl": 0.25,
+        "ls_ratio": 0.05
+      },
+      "structural_weights": {
+        "total_traders": 3.0,
+        "long_traders": 2.0,
+        "short_traders": 2.0,
+        "long_avg_price": 2.0,
+        "short_avg_price": 2.0,
+        "long_pos_usdt": 1.0,
+        "short_pos_usdt": 1.0,
+        "long_unrealized_pnl": 0.5,
+        "short_unrealized_pnl": 0.5,
+        "ls_ratio": 1.0
+      }
     },
     "loss": {
       "clean_baseline_threshold": -0.002,
@@ -55,6 +106,7 @@
       "forward_hours": [1, 4, 12, 24],
       "bootstrap_samples": 2000,
       "random_seed": 20260827
+      ,"max_forward_price_delay_minutes": 15
     }
   }
 }
