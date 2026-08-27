@@ -38,7 +38,7 @@
   },
   "smart_money_analysis": {
     "model_freeze_date": "2026-08-27T01:42:59Z",
-    "logic_valid_from": "2026-08-27T04:27:07Z",
+    "logic_valid_from": "2026-08-27T07:26:03Z",
     "cohort": {
       "total_trader_change_threshold": 0.08,
       "side_trader_change_threshold": 0.12,

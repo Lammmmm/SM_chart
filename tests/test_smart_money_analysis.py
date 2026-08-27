@@ -496,3 +496,50 @@ def test_out_of_sample_waits_for_logic_valid_from():
     processed, *_ = process(rows, cfg)
     assert not processed.loc[processed["timestamp"].eq(BASE + pd.Timedelta(minutes=35)), "out_of_sample"].iloc[0]
     assert processed.loc[processed["timestamp"].eq(BASE + pd.Timedelta(minutes=40)), "out_of_sample"].iloc[0]
+
+
+def test_processed_schema_exists_when_long_has_no_loss_events():
+    rows = [
+        record(minute, price=100.0, short_avg=100.0)
+        for minute in range(0, 35, 5)
+    ]
+    rows.extend([
+        record(35, price=103.0, short_avg=100.0),
+        record(40, price=104.0, short_avg=100.0),
+    ])
+    processed, _, episodes, _, _ = process(rows)
+    columns = [
+        "long_position_qty_change_since_loss",
+        "long_position_notional_change_since_loss",
+        "long_loss_start_position_qty_proxy",
+        "short_position_qty_change_since_loss",
+        "short_position_notional_change_since_loss",
+        "short_loss_start_position_qty_proxy",
+    ]
+    assert all(column in processed.columns for column in columns)
+    assert processed[columns[:3]].isna().all().all()
+    assert not episodes.empty
+    assert set(episodes["side"]) == {"SHORT"}
+
+
+def test_processed_schema_exists_when_both_sides_have_no_loss_events():
+    processed, _, episodes, actions, _ = process(baseline_records())
+    numeric_columns = [
+        f"{side}_{suffix}"
+        for side in ("long", "short")
+        for suffix in (
+            "loss_start_position_qty_proxy",
+            "position_notional_change_since_loss",
+            "position_qty_change_since_loss",
+        )
+    ]
+    action_columns = [
+        f"{side}_{suffix}"
+        for side in ("long", "short")
+        for suffix in ("action_event", "action_type", "action_event_id")
+    ]
+    assert all(column in processed.columns for column in numeric_columns + action_columns)
+    assert processed[numeric_columns].isna().all().all()
+    assert not processed[["long_action_event", "short_action_event"]].any().any()
+    assert episodes.empty
+    assert actions.empty

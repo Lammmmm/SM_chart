@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -30,6 +31,17 @@ EVENT_TYPE_ZH = {
 }
 SIDE_ZH = {"long": "多头", "short": "空头"}
 RESPONSE_ZH = {"ADD": "加仓", "HOLD": "持仓", "REDUCE": "减仓"}
+V21_CORE_COLUMNS = [
+    "cohort_net_qty_flow", "long_qty_change_pct", "short_qty_change_pct",
+]
+V21_OPTIONAL_HOVER_COLUMNS = [
+    "long_position_qty_change_since_loss",
+    "short_position_qty_change_since_loss",
+    "long_position_notional_change_since_loss",
+    "short_position_notional_change_since_loss",
+    "long_loss_start_position_qty_proxy",
+    "short_loss_start_position_qty_proxy",
+]
 
 
 def _read_derived() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
@@ -37,6 +49,9 @@ def _read_derived() -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     events = pd.read_parquet(EVENTS_PATH)
     summary = json.loads(SUMMARY_PATH.read_text(encoding="utf-8"))
     processed["timestamp"] = pd.to_datetime(processed["timestamp"], utc=True)
+    for column in V21_OPTIONAL_HOVER_COLUMNS:
+        if column not in processed:
+            processed[column] = np.nan
     if not events.empty:
         for column in [
             "event_timestamp", "loss_start_timestamp", "action_timestamp",
@@ -93,6 +108,12 @@ def render_cohort_analysis_section(st: Any, period_label: str) -> None:
         processed, events, summary = _read_derived()
     except Exception as exc:
         st.warning(f"读取分析结果失败：{exc}")
+        return
+    missing_core = [column for column in V21_CORE_COLUMNS if column not in processed]
+    if missing_core:
+        st.warning(
+            "检测到旧版分析缓存，请点击上方“重新生成批次、事件和回测”生成 v2.1 分析结果。"
+        )
         return
 
     cards = st.columns(8)
@@ -157,19 +178,20 @@ def render_cohort_analysis_section(st: Any, period_label: str) -> None:
                 chart[f"{side}_action_event"]
                 & chart[f"{side}_action_type"].eq(response)
             ]
+            hover_columns = [
+                "current_price", f"{side}_loss_depth",
+                f"{side}_loss_duration_minutes",
+                f"{side}_position_qty_change_since_loss",
+                f"{side}_position_change_since_loss",
+                f"{side}_avg_entry_change_since_loss",
+                "cohort_net_qty_flow", "cohort_confidence",
+            ]
             loss_figure.add_trace(go.Scatter(
                 x=points["timestamp"], y=points[f"{side}_directional_return"],
                 name=f"{SIDE_ZH[side]}亏损后首次明显{RESPONSE_ZH[response]}",
                 mode="markers",
                 marker=dict(symbol=symbol, size=9, color=color),
-                customdata=points[[
-                    "current_price", f"{side}_loss_depth",
-                    f"{side}_loss_duration_minutes",
-                    f"{side}_position_qty_change_since_loss",
-                    f"{side}_position_change_since_loss",
-                    f"{side}_avg_entry_change_since_loss",
-                    "cohort_net_qty_flow", "cohort_confidence",
-                ]],
+                customdata=points.reindex(columns=hover_columns),
                 hovertemplate=(
                     "时间=%{x}<br>比特币价格=%{customdata[0]:,.2f}"
                     "<br>亏损深度=%{customdata[1]:.2%}"

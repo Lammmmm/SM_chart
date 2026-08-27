@@ -304,7 +304,7 @@ CORE_REQUIRED_COLUMNS = [
 ]
 DEFAULT_CONFIG: dict[str, Any] = {
     "model_freeze_date": "2026-08-27T01:42:59Z",
-    "logic_valid_from": "2026-08-27T04:27:07Z",
+    "logic_valid_from": "2026-08-27T07:26:03Z",
     "cohort": {
         "total_trader_change_threshold": 0.08,
         "side_trader_change_threshold": 0.12,
@@ -1635,9 +1635,11 @@ def build_loss_event_tables(
             pd.NaT, index=result.index, dtype="datetime64[ns, UTC]"
         )
         for suffix in [
-            "loss_start_price", "loss_start_position", "loss_start_avg_entry",
+            "loss_start_price", "loss_start_position",
+            "loss_start_position_qty_proxy", "loss_start_avg_entry",
             "loss_start_net_exposure", "loss_duration_minutes",
-            "position_change_since_loss", "avg_entry_change_since_loss",
+            "position_change_since_loss", "position_notional_change_since_loss",
+            "position_qty_change_since_loss", "avg_entry_change_since_loss",
         ]:
             result[f"{side}_{suffix}"] = np.nan
         result[f"{side}_loss_response"] = None
